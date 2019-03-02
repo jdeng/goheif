@@ -71,7 +71,7 @@ func decodeHevcItem(hf *heif.File, item *heif.Item) (*image.YCbCr, error) {
 	return ycc, nil
 }
 
-func DecodeImageExif(ra io.ReaderAt) ([]byte, error) {
+func ExtractExif(ra io.ReaderAt) ([]byte, error) {
 	hf := heif.Open(ra)
 	return hf.EXIF()
 }

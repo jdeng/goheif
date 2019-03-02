@@ -72,7 +72,7 @@ func main() {
 	}
 	defer fi.Close()
 
-	exif, err := goheif.DecodeImageExif(fi)
+	exif, err := goheif.ExtractExif(fi)
 	if err != nil {
 		log.Printf("Warning: no EXIF from %s: %v\n", fin, err)
 	}
