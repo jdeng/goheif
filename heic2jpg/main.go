@@ -82,7 +82,7 @@ func main() {
 		log.Fatalf("Failed to parse %s: %v\n", fin, err)
 	}
 
-	fo, err := os.OpenFile(fout, os.O_RDWR|os.O_CREATE, 0755)
+	fo, err := os.OpenFile(fout, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		log.Fatalf("Failed to create output file %s: %v\n", fout, err)
 	}
