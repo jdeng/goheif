@@ -94,9 +94,9 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 				r = image.YCbCrSubsampleRatio444
 			}
 			ycc := &image.YCbCr{
-				Y:              (*[1 << 31]byte)(unsafe.Pointer(y))[:int(height)*int(ystride)],
-				Cb:             (*[1 << 31]byte)(unsafe.Pointer(cb))[:int(cbh)*int(cstride)],
-				Cr:             (*[1 << 31]byte)(unsafe.Pointer(cr))[:int(cbh)*int(cstride)],
+				Y:              C.GoBytes(unsafe.Pointer(y), C.int(height*ystride)),
+				Cb:             C.GoBytes(unsafe.Pointer(cb), C.int(cbh*cstride)),
+				Cr:             C.GoBytes(unsafe.Pointer(cr), C.int(cbh*cstride)),
 				YStride:        int(ystride),
 				CStride:        int(cstride),
 				SubsampleRatio: r,

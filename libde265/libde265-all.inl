@@ -1,4 +1,9 @@
-#define HAVE_POSIX_MEMALIGN
+#if _WIN32
+#include "extra/win32cond.c"
+#define HAVE___MINGW_ALIGNED_MALLOC 1
+#else
+#define HAVE_POSIX_MEMALIGN 1
+#endif
 #define HAVE_SSE4_1 1
 // #define HAVE_ARM
 // #define HAVE_NEON
