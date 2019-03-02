@@ -1,5 +1,7 @@
 # GoHeif - A go gettable decoder/converter for HEIC based on libde265
----
+
+## Install
+``` go get github.com/jdeng/goheif/...```
 
 ## What is done
 
