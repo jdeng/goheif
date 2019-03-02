@@ -22,7 +22,7 @@
 ## Credits
 - heif parser by @bradfitz (https://github.com/go4org/go4/tree/master/media/heif)
 - libde265 (https://github.com/strukturag/libde265)
-- implementation following libheif (https://github.com/strukturag/libheif)
+- implementation learnt from libheif (https://github.com/strukturag/libheif)
 
 ## TODO
 - Upstream the changes to heif?
