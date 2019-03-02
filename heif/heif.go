@@ -24,10 +24,9 @@ package heif
 import (
 	"errors"
 	"fmt"
+	"github.com/jdeng/goheif/heif/bmff"
 	"io"
 	"log"
-
-	"github.com/jdeng/goheif/heif/bmff"
 )
 
 // File represents a HEIF file.
@@ -181,16 +180,16 @@ func (f *File) EXIF() ([]byte, error) {
 func (f *File) GetItemData(it *Item) ([]byte, error) {
 	loc := it.Location
 	if loc == nil {
-		return nil, errors.New("heif: file said it contained EXIF, but didn't say where")
+		return nil, errors.New("heif: item has no location")
 	}
 	if n := len(loc.Extents); n != 1 {
-		return nil, fmt.Errorf("heif: expected 1 EXIF section, saw %d", n)
+		return nil, fmt.Errorf("heif: expected 1 section, saw %d", n)
 	}
 	offLen := loc.Extents[0]
 
 	if loc.ConstructionMethod == 1 {
 		if f.meta.ItemData == nil {
-			return nil, fmt.Errorf("heif: no idat")
+			return nil, fmt.Errorf("heif: no idat for item")
 		}
 		if offLen.Offset+offLen.Length > uint64(len(f.meta.ItemData.Data)) {
 			return nil, fmt.Errorf("heif: idat out of bound")
