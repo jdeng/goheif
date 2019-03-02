@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include "libde265-all.inl"
 
 extern "C" int push_data(de265_decoder_context *ctx, const void *data, size_t size) {

@@ -1,7 +1,8 @@
 package libde265
 
-//#cgo CXXFLAGS: -Ilibde265 -I. -std=c++11 -Wno-constant-conversion
+//#cgo CXXFLAGS: -Ilibde265 -I. -std=c++11 -Wno-constant-conversion -msse4.1
 //#cgo CFLAGS: -I.
+// #include <stdint.h>
 // #include "libde265/de265.h"
 // int push_data(void *dec, const void *data, size_t size);
 import "C"
