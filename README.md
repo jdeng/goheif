@@ -6,8 +6,8 @@
 ``` go get github.com/jdeng/goheif/...```
 
 - Tested
- - Mac OS X High Sierra / Linux (Ubuntu 16.04 / GCC 5.4)
- - Windows 7 64bit with TDM-GCC 32 (GCC 5.1) and golang 1.12 windows/386
+  - Mac OS X High Sierra / Linux (Ubuntu 16.04 / GCC 5.4)
+  - Windows 7 64bit with TDM-GCC 32 (GCC 5.1) and golang 1.12 windows/386
 
 - Code Sample
 ```
