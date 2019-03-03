@@ -5,7 +5,6 @@ package libde265
 // #include <stdint.h>
 // #include <stdlib.h>
 // #include "libde265/de265.h"
-// int push_data(void *dec, const void *data, size_t size);
 import "C"
 
 import (
@@ -15,7 +14,8 @@ import (
 )
 
 type Decoder struct {
-	ctx unsafe.Pointer
+	ctx      unsafe.Pointer
+	hasImage bool
 }
 
 func Init() {
@@ -28,12 +28,16 @@ func Fini() {
 
 func NewDecoder() *Decoder {
 	if p := C.de265_new_decoder(); p != nil {
-		return &Decoder{p}
+		return &Decoder{ctx: p, hasImage: false}
 	}
 	return nil
 }
 
 func (dec *Decoder) Free() {
+	if dec.hasImage {
+		C.de265_release_next_picture(dec.ctx)
+		dec.hasImage = false
+	}
 	C.de265_free_decoder(dec.ctx)
 }
 
@@ -42,16 +46,36 @@ func (dec *Decoder) Reset() {
 }
 
 func (dec *Decoder) Push(data []byte) error {
-	if ret := C.push_data(dec.ctx, unsafe.Pointer(&data[0]), C.size_t(len(data))); ret < 0 {
-		return fmt.Errorf("push_data error")
+	var pos int
+	totalSize := len(data)
+	for pos < totalSize {
+		if pos+4 > totalSize {
+			return fmt.Errorf("Invalid NAL data")
+		}
+
+		nalSize := uint32(data[pos])<<24 | uint32(data[pos+1])<<16 | uint32(data[pos+2])<<8 | uint32(data[pos+3])
+		pos += 4
+
+		if pos+int(nalSize) > totalSize {
+			return fmt.Errorf("Invalid NAL size: %d", nalSize)
+		}
+
+		C.de265_push_NAL(dec.ctx, unsafe.Pointer(&data[pos]), C.int(nalSize), C.de265_PTS(0), nil)
+		pos += int(nalSize)
 	}
+
 	return nil
 }
 
 func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
+	if dec.hasImage {
+		C.de265_release_next_picture(dec.ctx)
+		dec.hasImage = false
+	}
+
 	if len(data) > 0 {
-		if ret := C.push_data(dec.ctx, unsafe.Pointer(&data[0]), C.size_t(len(data))); ret < 0 {
-			return nil, fmt.Errorf("push_data error")
+		if err := dec.Push(data); err != nil {
+			return nil, err
 		}
 	}
 
@@ -94,16 +118,21 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 				r = image.YCbCrSubsampleRatio444
 			}
 			ycc := &image.YCbCr{
-				Y:              C.GoBytes(unsafe.Pointer(y), C.int(height*ystride)),
-				Cb:             C.GoBytes(unsafe.Pointer(cb), C.int(cheight*cstride)),
-				Cr:             C.GoBytes(unsafe.Pointer(cr), C.int(cheight*cstride)),
+				Y:  (*[1 << 31]byte)(unsafe.Pointer(y))[:int(height)*int(ystride)],
+				Cb: (*[1 << 31]byte)(unsafe.Pointer(cb))[:int(cheight)*int(cstride)],
+				Cr: (*[1 << 31]byte)(unsafe.Pointer(cr))[:int(cheight)*int(cstride)],
+				//	Y:              C.GoBytes(unsafe.Pointer(y), C.int(height*ystride)),
+				//	Cb:             C.GoBytes(unsafe.Pointer(cb), C.int(cheight*cstride)),
+				//	Cr:             C.GoBytes(unsafe.Pointer(cr), C.int(cheight*cstride)),
 				YStride:        int(ystride),
 				CStride:        int(cstride),
 				SubsampleRatio: r,
 				Rect:           image.Rectangle{Min: image.Point{0, 0}, Max: image.Point{int(width), int(height)}},
 			}
 
-			C.de265_release_next_picture(dec.ctx)
+			//			C.de265_release_next_picture(dec.ctx)
+			dec.hasImage = true
+
 			return ycc, nil
 		}
 	}
