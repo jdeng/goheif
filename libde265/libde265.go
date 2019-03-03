@@ -100,6 +100,8 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 		}
 
 		if img := C.de265_get_next_picture(dec.ctx); img != nil {
+			dec.hasImage = true // lazy release
+
 			width := C.de265_get_image_width(img, 0)
 			height := C.de265_get_image_height(img, 0)
 
@@ -109,6 +111,11 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 			cheight := C.de265_get_image_height(img, 1)
 			cr := C.de265_get_image_plane(img, 2, &cstride)
 			//			crh := C.de265_get_image_height(img, 2)
+
+			// sanity check
+			if int(height) * int(ystride) >= int(1 << 30) {
+				return nil, fmt.Errorf("image too big")
+			}
 
 			var r image.YCbCrSubsampleRatio
 			switch chroma := C.de265_get_chroma_format(img); chroma {
@@ -120,9 +127,9 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 				r = image.YCbCrSubsampleRatio444
 			}
 			ycc := &image.YCbCr{
-				Y:  (*[1 << 31]byte)(unsafe.Pointer(y))[:int(height)*int(ystride)],
-				Cb: (*[1 << 31]byte)(unsafe.Pointer(cb))[:int(cheight)*int(cstride)],
-				Cr: (*[1 << 31]byte)(unsafe.Pointer(cr))[:int(cheight)*int(cstride)],
+				Y:  (*[1 << 30]byte)(unsafe.Pointer(y))[:int(height)*int(ystride)],
+				Cb: (*[1 << 30]byte)(unsafe.Pointer(cb))[:int(cheight)*int(cstride)],
+				Cr: (*[1 << 30]byte)(unsafe.Pointer(cr))[:int(cheight)*int(cstride)],
 				//Y:              C.GoBytes(unsafe.Pointer(y), C.int(height*ystride)),
 				//Cb:             C.GoBytes(unsafe.Pointer(cb), C.int(cheight*cstride)),
 				//Cr:             C.GoBytes(unsafe.Pointer(cr), C.int(cheight*cstride)),
@@ -133,7 +140,6 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 			}
 
 			//C.de265_release_next_picture(dec.ctx)
-			dec.hasImage = true
 
 			return ycc, nil
 		}
