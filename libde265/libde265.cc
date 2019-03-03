@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include "libde265-all.inl"
 
+// copied from https://github.com/strukturag/libheif/blob/master/libheif/heif_decoder_libde265.cc with modification
 extern "C" int push_data(de265_decoder_context *ctx, const void *data, size_t size) {
   const uint8_t* cdata = (const uint8_t*)data;
 

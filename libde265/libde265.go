@@ -80,7 +80,7 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 			var ystride, cstride C.int
 			y := C.de265_get_image_plane(img, 0, &ystride)
 			cb := C.de265_get_image_plane(img, 1, &cstride)
-			cbh := C.de265_get_image_height(img, 1)
+			cheight := C.de265_get_image_height(img, 1)
 			cr := C.de265_get_image_plane(img, 2, &cstride)
 			//			crh := C.de265_get_image_height(img, 2)
 
@@ -95,8 +95,8 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 			}
 			ycc := &image.YCbCr{
 				Y:              C.GoBytes(unsafe.Pointer(y), C.int(height*ystride)),
-				Cb:             C.GoBytes(unsafe.Pointer(cb), C.int(cbh*cstride)),
-				Cr:             C.GoBytes(unsafe.Pointer(cr), C.int(cbh*cstride)),
+				Cb:             C.GoBytes(unsafe.Pointer(cb), C.int(cheight*cstride)),
+				Cr:             C.GoBytes(unsafe.Pointer(cr), C.int(cheight*cstride)),
 				YStride:        int(ystride),
 				CStride:        int(cstride),
 				SubsampleRatio: r,
