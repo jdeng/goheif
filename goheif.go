@@ -39,7 +39,7 @@ func newGridBox(data []byte) (*gridBox, error) {
 	return &gridBox{columns: columns, rows: rows, width: width, height: height}, nil
 }
 
-func decodeHevcItem(hf *heif.File, item *heif.Item) (*image.YCbCr, error) {
+func decodeHevcItem(dec *libde265.Decoder, hf *heif.File, item *heif.Item) (*image.YCbCr, error) {
 	if item.Info.ItemType != "hvc1" {
 		return nil, fmt.Errorf("Unsupported item type: %s", item.Info.ItemType)
 	}
@@ -55,10 +55,9 @@ func decodeHevcItem(hf *heif.File, item *heif.Item) (*image.YCbCr, error) {
 		return nil, err
 	}
 
-	dec := libde265.NewDecoder()
+	dec.Reset()
 	dec.Push(hdr)
 	tile, err := dec.DecodeImage(data)
-	dec.Free()
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +92,10 @@ func DecodeImage(ra io.ReaderAt) (image.Image, error) {
 		return nil, fmt.Errorf("No item info")
 	}
 
+	dec := libde265.NewDecoder()
+	defer dec.Free()
 	if it.Info.ItemType == "hvc1" {
-		return decodeHevcItem(hf, it)
+		return decodeHevcItem(dec, hf, it)
 	}
 
 	if it.Info.ItemType != "grid" {
@@ -130,7 +131,7 @@ func DecodeImage(ra io.ReaderAt) (image.Image, error) {
 				return nil, err
 			}
 
-			ycc, err := decodeHevcItem(hf, item)
+			ycc, err := decodeHevcItem(dec, hf, item)
 			if err != nil {
 				return nil, err
 			}

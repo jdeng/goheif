@@ -33,15 +33,18 @@ func NewDecoder() *Decoder {
 	return nil
 }
 
+
 func (dec *Decoder) Free() {
-	if dec.hasImage {
-		C.de265_release_next_picture(dec.ctx)
-		dec.hasImage = false
-	}
+	dec.Reset()
 	C.de265_free_decoder(dec.ctx)
 }
 
 func (dec *Decoder) Reset() {
+	if dec.ctx != nil && dec.hasImage {
+		C.de265_release_next_picture(dec.ctx)
+		dec.hasImage = false
+	}
+
 	C.de265_reset(dec.ctx)
 }
 
@@ -69,8 +72,7 @@ func (dec *Decoder) Push(data []byte) error {
 
 func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 	if dec.hasImage {
-		C.de265_release_next_picture(dec.ctx)
-		dec.hasImage = false
+		fmt.Printf("previous image may leak")
 	}
 
 	if len(data) > 0 {
@@ -118,20 +120,20 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 				r = image.YCbCrSubsampleRatio444
 			}
 			ycc := &image.YCbCr{
-				//Y:  (*[1 << 31]byte)(unsafe.Pointer(y))[:int(height)*int(ystride)],
-				//Cb: (*[1 << 31]byte)(unsafe.Pointer(cb))[:int(cheight)*int(cstride)],
-				//Cr: (*[1 << 31]byte)(unsafe.Pointer(cr))[:int(cheight)*int(cstride)],
-				Y:              C.GoBytes(unsafe.Pointer(y), C.int(height*ystride)),
-				Cb:             C.GoBytes(unsafe.Pointer(cb), C.int(cheight*cstride)),
-				Cr:             C.GoBytes(unsafe.Pointer(cr), C.int(cheight*cstride)),
+				Y:  (*[1 << 31]byte)(unsafe.Pointer(y))[:int(height)*int(ystride)],
+				Cb: (*[1 << 31]byte)(unsafe.Pointer(cb))[:int(cheight)*int(cstride)],
+				Cr: (*[1 << 31]byte)(unsafe.Pointer(cr))[:int(cheight)*int(cstride)],
+				//Y:              C.GoBytes(unsafe.Pointer(y), C.int(height*ystride)),
+				//Cb:             C.GoBytes(unsafe.Pointer(cb), C.int(cheight*cstride)),
+				//Cr:             C.GoBytes(unsafe.Pointer(cr), C.int(cheight*cstride)),
 				YStride:        int(ystride),
 				CStride:        int(cstride),
 				SubsampleRatio: r,
 				Rect:           image.Rectangle{Min: image.Point{0, 0}, Max: image.Point{int(width), int(height)}},
 			}
 
-			C.de265_release_next_picture(dec.ctx)
-			//dec.hasImage = true
+			//C.de265_release_next_picture(dec.ctx)
+			dec.hasImage = true
 
 			return ycc, nil
 		}
