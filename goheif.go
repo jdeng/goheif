@@ -1,12 +1,15 @@
 package goheif
 
 import (
+	"bytes"
 	"fmt"
-	"github.com/jdeng/goheif/heif"
-	"github.com/jdeng/goheif/libde265"
 	"image"
 	"image/color"
 	"io"
+	"io/ioutil"
+
+	"github.com/jdeng/goheif/heif"
+	"github.com/jdeng/goheif/libde265"
 )
 
 type gridBox struct {
@@ -75,7 +78,12 @@ func ExtractExif(ra io.ReaderAt) ([]byte, error) {
 	return hf.EXIF()
 }
 
-func DecodeImage(ra io.ReaderAt) (image.Image, error) {
+func Decode(r io.Reader) (image.Image, error) {
+	ra, err := asReaderAt(r)
+	if err != nil {
+		return nil, err
+	}
+
 	hf := heif.Open(ra)
 
 	it, err := hf.PrimaryItem()
@@ -170,8 +178,13 @@ func DecodeImage(ra io.ReaderAt) (image.Image, error) {
 	return out, nil
 }
 
-func DecodeConfig(ra io.ReaderAt) (image.Config, error) {
+func DecodeConfig(r io.Reader) (image.Config, error) {
 	var config image.Config
+
+	ra, err := asReaderAt(r)
+	if err != nil {
+		return config, err
+	}
 
 	hf := heif.Open(ra)
 
@@ -193,7 +206,22 @@ func DecodeConfig(ra io.ReaderAt) (image.Config, error) {
 	return config, nil
 }
 
+func asReaderAt(r io.Reader) (io.ReaderAt, error) {
+	if ra, ok := r.(io.ReaderAt); ok {
+		return ra, nil
+	}
+
+	b, err := ioutil.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes.NewReader(b), nil
+}
+
 func init() {
 	libde265.Init()
-	//image.RegisterFormat("heif", "????ftypheic", decodeImage, decodeConfig)
+	// they check for "ftyp" at the 5th bytes, let's do the same...
+	// https://github.com/strukturag/libheif/blob/master/libheif/heif.cc#L94
+	image.RegisterFormat("heic", "????ftyp", Decode, DecodeConfig)
 }
