@@ -14,8 +14,9 @@ import (
 )
 
 type Decoder struct {
-	ctx      unsafe.Pointer
-	hasImage bool
+	ctx        unsafe.Pointer
+	hasImage   bool
+	safeEncode bool
 }
 
 func Init() {
@@ -26,13 +27,27 @@ func Fini() {
 	C.de265_free()
 }
 
-func NewDecoder() *Decoder {
-	if p := C.de265_new_decoder(); p != nil {
-		return &Decoder{ctx: p, hasImage: false}
+func NewDecoder(opts ...Option) (*Decoder, error) {
+	p := C.de265_new_decoder()
+	if p == nil {
+		return nil, fmt.Errorf("Unable to create decoder")
 	}
-	return nil
+
+	dec := &Decoder{ctx: p, hasImage: false}
+	for _, opt := range opts {
+		opt(dec)
+	}
+
+	return dec, nil
 }
 
+type Option func(*Decoder)
+
+func WithSafeEncoding(b bool) Option {
+	return func(dec *Decoder) {
+		dec.safeEncode = b
+	}
+}
 
 func (dec *Decoder) Free() {
 	dec.Reset()
@@ -113,7 +128,7 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 			//			crh := C.de265_get_image_height(img, 2)
 
 			// sanity check
-			if int(height) * int(ystride) >= int(1 << 30) {
+			if int(height)*int(ystride) >= int(1<<30) {
 				return nil, fmt.Errorf("image too big")
 			}
 
@@ -127,16 +142,19 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 				r = image.YCbCrSubsampleRatio444
 			}
 			ycc := &image.YCbCr{
-				Y:  (*[1 << 30]byte)(unsafe.Pointer(y))[:int(height)*int(ystride)],
-				Cb: (*[1 << 30]byte)(unsafe.Pointer(cb))[:int(cheight)*int(cstride)],
-				Cr: (*[1 << 30]byte)(unsafe.Pointer(cr))[:int(cheight)*int(cstride)],
-				//Y:              C.GoBytes(unsafe.Pointer(y), C.int(height*ystride)),
-				//Cb:             C.GoBytes(unsafe.Pointer(cb), C.int(cheight*cstride)),
-				//Cr:             C.GoBytes(unsafe.Pointer(cr), C.int(cheight*cstride)),
 				YStride:        int(ystride),
 				CStride:        int(cstride),
 				SubsampleRatio: r,
 				Rect:           image.Rectangle{Min: image.Point{0, 0}, Max: image.Point{int(width), int(height)}},
+			}
+			if dec.safeEncode {
+				ycc.Y = C.GoBytes(unsafe.Pointer(y), C.int(height*ystride))
+				ycc.Cb = C.GoBytes(unsafe.Pointer(cb), C.int(cheight*cstride))
+				ycc.Cr = C.GoBytes(unsafe.Pointer(cr), C.int(cheight*cstride))
+			} else {
+				ycc.Y = (*[1 << 30]byte)(unsafe.Pointer(y))[:int(height)*int(ystride)]
+				ycc.Cb = (*[1 << 30]byte)(unsafe.Pointer(cb))[:int(cheight)*int(cstride)]
+				ycc.Cr = (*[1 << 30]byte)(unsafe.Pointer(cr))[:int(cheight)*int(cstride)]
 			}
 
 			//C.de265_release_next_picture(dec.ctx)
