@@ -12,6 +12,10 @@ import (
 	"github.com/jdeng/goheif/libde265"
 )
 
+// SafeEncoding uses more memory but seems to make
+// the library safer to use in containers.
+var SafeEncoding bool
+
 type gridBox struct {
 	columns, rows int
 	width, height int
@@ -100,7 +104,10 @@ func Decode(r io.Reader) (image.Image, error) {
 		return nil, fmt.Errorf("No item info")
 	}
 
-	dec := libde265.NewDecoder()
+	dec, err := libde265.NewDecoder(libde265.WithSafeEncoding(SafeEncoding))
+	if err != nil {
+		return nil, err
+	}
 	defer dec.Free()
 	if it.Info.ItemType == "hvc1" {
 		return decodeHevcItem(dec, hf, it)
