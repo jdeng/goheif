@@ -1,6 +1,6 @@
 package libde265
 
-//#cgo CXXFLAGS: -Ilibde265 -I. -std=c++11 -Wno-constant-conversion -msse4.1
+//#cgo CXXFLAGS: -Ilibde265 -I. -std=c++11 -msse4.1
 //#cgo CFLAGS: -I.
 // #include <stdint.h>
 // #include <stdlib.h>
