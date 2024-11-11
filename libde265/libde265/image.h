@@ -30,9 +30,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <memory>
-#ifdef HAVE_STDBOOL_H
-#include <stdbool.h>
-#endif
 
 #include "libde265/de265.h"
 #include "libde265/sps.h"
@@ -627,7 +624,14 @@ public:
 
   enum IntraPredMode get_IntraPredMode(int x,int y) const
   {
-    return (enum IntraPredMode)intraPredMode.get(x,y);
+    uint8_t ipm = intraPredMode.get(x,y);
+
+    // sanitize values if IPM is uninitialized (because of earlier read error)
+    if (ipm > 34) {
+      ipm = 0;
+    }
+
+    return static_cast<enum IntraPredMode>(ipm);
   }
 
   enum IntraPredMode get_IntraPredMode_atIndex(int idx) const
@@ -712,6 +716,10 @@ public:
   // address of first CTB in slice
   void set_SliceAddrRS(int ctbX, int ctbY, int SliceAddrRS)
   {
+    if (ctbX >= ctb_info.width_in_units || ctbY >= ctb_info.height_in_units) {
+      return;
+    }
+
     int idx = ctbX + ctbY*ctb_info.width_in_units;
     ctb_info[idx].SliceAddrRS = SliceAddrRS;
   }

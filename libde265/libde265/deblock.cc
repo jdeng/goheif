@@ -295,67 +295,82 @@ void derive_boundaryStrength(de265_image* img, bool vertical, int yStart,int yEn
             slice_segment_header* shdrP = img->get_SliceHeader(xDiOpp,yDiOpp);
             slice_segment_header* shdrQ = img->get_SliceHeader(xDi   ,yDi);
 
-            int refPicP0 = mviP.predFlag[0] ? shdrP->RefPicList[0][ mviP.refIdx[0] ] : -1;
-            int refPicP1 = mviP.predFlag[1] ? shdrP->RefPicList[1][ mviP.refIdx[1] ] : -1;
-            int refPicQ0 = mviQ.predFlag[0] ? shdrQ->RefPicList[0][ mviQ.refIdx[0] ] : -1;
-            int refPicQ1 = mviQ.predFlag[1] ? shdrQ->RefPicList[1][ mviQ.refIdx[1] ] : -1;
+	    if (shdrP && shdrQ) {
 
-            bool samePics = ((refPicP0==refPicQ0 && refPicP1==refPicQ1) ||
-                             (refPicP0==refPicQ1 && refPicP1==refPicQ0));
+        if (mviP.refIdx[0] > MAX_NUM_REF_PICS ||
+            mviP.refIdx[1] > MAX_NUM_REF_PICS ||
+            mviQ.refIdx[0] > MAX_NUM_REF_PICS ||
+            mviQ.refIdx[1] > MAX_NUM_REF_PICS) {
+          // we cannot return an error from here, so just set a valid boundaryStrength value and continue;
+          img->set_deblk_bS(xDi, yDi, 0);
+          continue;
+        }
 
-            if (!samePics) {
-              bS = 1;
-            }
-            else {
-              MotionVector mvP0 = mviP.mv[0]; if (!mviP.predFlag[0]) { mvP0.x=mvP0.y=0; }
-              MotionVector mvP1 = mviP.mv[1]; if (!mviP.predFlag[1]) { mvP1.x=mvP1.y=0; }
-              MotionVector mvQ0 = mviQ.mv[0]; if (!mviQ.predFlag[0]) { mvQ0.x=mvQ0.y=0; }
-              MotionVector mvQ1 = mviQ.mv[1]; if (!mviQ.predFlag[1]) { mvQ1.x=mvQ1.y=0; }
+	      int refPicP0 = mviP.predFlag[0] ? shdrP->RefPicList[0][ mviP.refIdx[0] ] : -1;
+	      int refPicP1 = mviP.predFlag[1] ? shdrP->RefPicList[1][ mviP.refIdx[1] ] : -1;
+	      int refPicQ0 = mviQ.predFlag[0] ? shdrQ->RefPicList[0][ mviQ.refIdx[0] ] : -1;
+	      int refPicQ1 = mviQ.predFlag[1] ? shdrQ->RefPicList[1][ mviQ.refIdx[1] ] : -1;
 
-              int numMV_P = mviP.predFlag[0] + mviP.predFlag[1];
-              int numMV_Q = mviQ.predFlag[0] + mviQ.predFlag[1];
+	      bool samePics = ((refPicP0==refPicQ0 && refPicP1==refPicQ1) ||
+			       (refPicP0==refPicQ1 && refPicP1==refPicQ0));
 
-              if (numMV_P!=numMV_Q) {
-                img->decctx->add_warning(DE265_WARNING_NUMMVP_NOT_EQUAL_TO_NUMMVQ, false);
-                img->integrity = INTEGRITY_DECODING_ERRORS;
-              }
+	      if (!samePics) {
+		bS = 1;
+	      }
+	      else {
+		MotionVector mvP0 = mviP.mv[0]; if (!mviP.predFlag[0]) { mvP0.x=mvP0.y=0; }
+		MotionVector mvP1 = mviP.mv[1]; if (!mviP.predFlag[1]) { mvP1.x=mvP1.y=0; }
+		MotionVector mvQ0 = mviQ.mv[0]; if (!mviQ.predFlag[0]) { mvQ0.x=mvQ0.y=0; }
+		MotionVector mvQ1 = mviQ.mv[1]; if (!mviQ.predFlag[1]) { mvQ1.x=mvQ1.y=0; }
 
-              // two different reference pictures or only one reference picture
-              if (refPicP0 != refPicP1) {
+		int numMV_P = mviP.predFlag[0] + mviP.predFlag[1];
+		int numMV_Q = mviQ.predFlag[0] + mviQ.predFlag[1];
 
-                if (refPicP0 == refPicQ0) {
-                  if (abs_value(mvP0.x-mvQ0.x) >= 4 ||
-                      abs_value(mvP0.y-mvQ0.y) >= 4 ||
-                      abs_value(mvP1.x-mvQ1.x) >= 4 ||
-                      abs_value(mvP1.y-mvQ1.y) >= 4) {
-                    bS = 1;
-                  }
-                }
-                else {
-                  if (abs_value(mvP0.x-mvQ1.x) >= 4 ||
-                      abs_value(mvP0.y-mvQ1.y) >= 4 ||
-                      abs_value(mvP1.x-mvQ0.x) >= 4 ||
-                      abs_value(mvP1.y-mvQ0.y) >= 4) {
-                    bS = 1;
-                  }
-                }
-              }
-              else {
-                assert(refPicQ0==refPicQ1);
+		if (numMV_P!=numMV_Q) {
+		  img->decctx->add_warning(DE265_WARNING_NUMMVP_NOT_EQUAL_TO_NUMMVQ, false);
+		  img->integrity = INTEGRITY_DECODING_ERRORS;
+		}
 
-                if ((abs_value(mvP0.x-mvQ0.x) >= 4 ||
-                     abs_value(mvP0.y-mvQ0.y) >= 4 ||
-                     abs_value(mvP1.x-mvQ1.x) >= 4 ||
-                     abs_value(mvP1.y-mvQ1.y) >= 4)
-                    &&
-                    (abs_value(mvP0.x-mvQ1.x) >= 4 ||
-                     abs_value(mvP0.y-mvQ1.y) >= 4 ||
-                     abs_value(mvP1.x-mvQ0.x) >= 4 ||
-                     abs_value(mvP1.y-mvQ0.y) >= 4)) {
-                  bS = 1;
-                }
-              }
-            }
+		// two different reference pictures or only one reference picture
+		if (refPicP0 != refPicP1) {
+
+		  if (refPicP0 == refPicQ0) {
+		    if (abs_value(mvP0.x-mvQ0.x) >= 4 ||
+			abs_value(mvP0.y-mvQ0.y) >= 4 ||
+			abs_value(mvP1.x-mvQ1.x) >= 4 ||
+			abs_value(mvP1.y-mvQ1.y) >= 4) {
+		      bS = 1;
+		    }
+		  }
+		  else {
+		    if (abs_value(mvP0.x-mvQ1.x) >= 4 ||
+			abs_value(mvP0.y-mvQ1.y) >= 4 ||
+			abs_value(mvP1.x-mvQ0.x) >= 4 ||
+			abs_value(mvP1.y-mvQ0.y) >= 4) {
+		      bS = 1;
+		    }
+		  }
+		}
+		else {
+		  assert(refPicQ0==refPicQ1);
+
+		  if ((abs_value(mvP0.x-mvQ0.x) >= 4 ||
+		       abs_value(mvP0.y-mvQ0.y) >= 4 ||
+		       abs_value(mvP1.x-mvQ1.x) >= 4 ||
+		       abs_value(mvP1.y-mvQ1.y) >= 4)
+		      &&
+		      (abs_value(mvP0.x-mvQ1.x) >= 4 ||
+		       abs_value(mvP0.y-mvQ1.y) >= 4 ||
+		       abs_value(mvP1.x-mvQ0.x) >= 4 ||
+		       abs_value(mvP1.y-mvQ0.y) >= 4)) {
+		    bS = 1;
+		  }
+		}
+	      }
+	    }
+	    else {
+	      bS = 0; // if shdrP==NULL or shdrQ==NULL
+	    }
 
             /*
               printf("unimplemented deblocking code for CU at %d;%d\n",xDi,yDi);
@@ -844,7 +859,7 @@ void edge_filtering_chroma_internal(de265_image* img, bool vertical,
 
 
             for (int k=0;k<4;k++) {
-              int delta = Clip3(-tc,tc, ((((q[0][k]-p[0][k])<<2)+p[1][k]-q[1][k]+4)>>3));
+              int delta = Clip3(-tc,tc, ((((q[0][k]-p[0][k])*4)+p[1][k]-q[1][k]+4)>>3)); // standard says <<2 in eq. (8-356), but the value can also be negative
               logtrace(LogDeblock,"delta=%d\n",delta);
               if (filterP) { ptr[-1+k*stride] = Clip_BitDepth(p[0][k]+delta, bitDepth_C); }
               if (filterQ) { ptr[ 0+k*stride] = Clip_BitDepth(q[0][k]-delta, bitDepth_C); }
@@ -860,7 +875,7 @@ void edge_filtering_chroma_internal(de265_image* img, bool vertical,
             if (img->get_cu_transquant_bypass(SubWidthC*xDi,SubHeightC*yDi)) filterQ=false;
 
             for (int k=0;k<4;k++) {
-              int delta = Clip3(-tc,tc, ((((q[0][k]-p[0][k])<<2)+p[1][k]-q[1][k]+4)>>3));
+              int delta = Clip3(-tc,tc, ((((q[0][k]-p[0][k])*4)+p[1][k]-q[1][k]+4)>>3)); // standard says <<2, but the value can also be negative
               if (filterP) { ptr[ k-1*stride] = Clip_BitDepth(p[0][k]+delta, bitDepth_C); }
               if (filterQ) { ptr[ k+0*stride] = Clip_BitDepth(q[0][k]-delta, bitDepth_C); }
             }

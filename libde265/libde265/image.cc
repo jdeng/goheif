@@ -20,6 +20,7 @@
 
 #include "image.h"
 #include "decctx.h"
+#include "en265.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -312,7 +313,7 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
     break;
   }
 
-  if (sps) {
+  if (chroma_format != de265_chroma_mono && sps) {
     assert(sps->SubWidthC  == SubWidthC);
     assert(sps->SubHeightC == SubHeightC);
   }
@@ -328,6 +329,14 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
   int right  = sps ? sps->conf_win_right_offset : 0;
   int top    = sps ? sps->conf_win_top_offset : 0;
   int bottom = sps ? sps->conf_win_bottom_offset : 0;
+
+  if ((left+right)*WinUnitX >= width) {
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
+
+  if ((top+bottom)*WinUnitY >= height) {
+    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  }
 
   width_confwin = width - (left+right)*WinUnitX;
   height_confwin= height- (top+bottom)*WinUnitY;
@@ -385,9 +394,15 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
                                                               alloc_userdata);
 
     pixels_confwin[0] = pixels[0] + left*WinUnitX + top*WinUnitY*stride;
-    pixels_confwin[1] = pixels[1] + left + top*chroma_stride;
-    pixels_confwin[2] = pixels[2] + left + top*chroma_stride;
 
+    if (chroma_format != de265_chroma_mono) {
+      pixels_confwin[1] = pixels[1] + left + top*chroma_stride;
+      pixels_confwin[2] = pixels[2] + left + top*chroma_stride;
+    }
+    else {
+      pixels_confwin[1] = NULL;
+      pixels_confwin[2] = NULL;
+    }
 
     // check for memory shortage
 
@@ -438,7 +453,8 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
 
     // CTB info
 
-    if (ctb_info.data_size != sps->PicSizeInCtbsY)
+    if (ctb_info.width_in_units != sps->PicWidthInCtbsY ||
+        ctb_info.height_in_units != sps->PicHeightInCtbsY)
       {
         delete[] ctb_progress;
 
@@ -503,7 +519,7 @@ void de265_image::release()
 
   // free slices
 
-  for (int i=0;i<slices.size();i++) {
+  for (size_t i=0;i<slices.size();i++) {
     delete slices[i];
   }
   slices.clear();

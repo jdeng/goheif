@@ -475,8 +475,8 @@ void put_qpel_0_0_fallback_16(int16_t *out, ptrdiff_t out_stride,
 
 
 
-static int fallback_extra_before[4] = { 0,3,3,2 };
-static int fallback_extra_after [4] = { 0,3,4,4 };
+static int extra_before[4] = { 0,3,3,2 };
+static int extra_after [4] = { 0,3,4,4 };
 
 template <class pixel_t>
 void put_qpel_fallback(int16_t *out, ptrdiff_t out_stride,
@@ -484,10 +484,10 @@ void put_qpel_fallback(int16_t *out, ptrdiff_t out_stride,
                        int nPbW, int nPbH, int16_t* mcbuffer,
                        int xFracL, int yFracL, int bit_depth)
 {
-  int extra_left   = fallback_extra_before[xFracL];
+  int extra_left   = extra_before[xFracL];
   //int extra_right  = extra_after [xFracL];
-  int extra_top    = fallback_extra_before[yFracL];
-  int extra_bottom = fallback_extra_after [yFracL];
+  int extra_top    = extra_before[yFracL];
+  int extra_bottom = extra_after [yFracL];
 
   //int nPbW_extra = extra_left + nPbW + extra_right;
   int nPbH_extra = extra_top  + nPbH + extra_bottom;

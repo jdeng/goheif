@@ -70,6 +70,10 @@ extern "C" {
 
 // version of linked libde265 library
 LIBDE265_API const char *de265_get_version(void);
+
+// returns the version number as a BCD number.
+// 0xAABBCCDD is interpreted as version AA.BB.CC.
+// For example: 0x02143000 is version 2.14.30
 LIBDE265_API uint32_t de265_get_version_number(void);
 
 LIBDE265_API int de265_get_version_number_major(void);
@@ -135,7 +139,14 @@ typedef enum {
   DE265_NON_EXISTING_LT_REFERENCE_CANDIDATE_IN_SLICE_HEADER=1023,
   DE265_WARNING_CANNOT_APPLY_SAO_OUT_OF_MEMORY=1024,
   DE265_WARNING_SPS_MISSING_CANNOT_DECODE_SEI=1025,
-  DE265_WARNING_COLLOCATED_MOTION_VECTOR_OUTSIDE_IMAGE_AREA=1026
+  DE265_WARNING_COLLOCATED_MOTION_VECTOR_OUTSIDE_IMAGE_AREA=1026,
+  DE265_WARNING_PCM_BITDEPTH_TOO_LARGE=1027,
+  DE265_WARNING_REFERENCE_IMAGE_BIT_DEPTH_DOES_NOT_MATCH=1028,
+  DE265_WARNING_REFERENCE_IMAGE_SIZE_DOES_NOT_MATCH_SPS=1029,
+  DE265_WARNING_CHROMA_OF_CURRENT_IMAGE_DOES_NOT_MATCH_SPS=1030,
+  DE265_WARNING_BIT_DEPTH_OF_CURRENT_IMAGE_DOES_NOT_MATCH_SPS=1031,
+  DE265_WARNING_REFERENCE_IMAGE_CHROMA_FORMAT_DOES_NOT_MATCH=1032,
+  DE265_WARNING_INVALID_SLICE_HEADER_INDEX_ACCESS=1033
 } de265_error;
 
 LIBDE265_API const char* de265_get_error_text(de265_error err);
@@ -185,6 +196,11 @@ LIBDE265_API void de265_get_image_NAL_header(const struct de265_image*,
                                              const char** nal_unit_name, // textual description of 'nal_unit_type'
                                              int* nuh_layer_id,
                                              int* nuh_temporal_id);
+
+LIBDE265_API int de265_get_image_full_range_flag(const struct de265_image*);
+LIBDE265_API int de265_get_image_colour_primaries(const struct de265_image*);
+LIBDE265_API int de265_get_image_transfer_characteristics(const struct de265_image*);
+LIBDE265_API int de265_get_image_matrix_coefficients(const struct de265_image*);
 
 
 /* === decoder === */

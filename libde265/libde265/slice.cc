@@ -373,7 +373,7 @@ de265_error slice_segment_header::read(bitreader* br, decoder_context* ctx,
   }
 
   slice_pic_parameter_set_id = get_uvlc(br);
-  if (slice_pic_parameter_set_id > DE265_MAX_PPS_SETS ||
+  if (slice_pic_parameter_set_id >= DE265_MAX_PPS_SETS ||
       slice_pic_parameter_set_id == UVLC_ERROR) {
     ctx->add_warning(DE265_WARNING_NONEXISTING_PPS_REFERENCED, false);
     return DE265_OK;
@@ -1277,14 +1277,23 @@ void slice_segment_header::dump_slice_segment_header(const decoder_context* ctx,
 #define LOG3(t,d1,d2,d3) log2fh(fh, t,d1,d2,d3)
 #define LOG4(t,d1,d2,d3,d4) log2fh(fh, t,d1,d2,d3,d4)
 
+  LOG0("----------------- SLICE -----------------\n");
+
   const pic_parameter_set* pps = ctx->get_pps(slice_pic_parameter_set_id);
+  if (!pps) {
+    LOG0("invalid PPS referenced\n");
+    return;
+  }
   assert(pps->pps_read); // TODO: error handling
 
   const seq_parameter_set* sps = ctx->get_sps((int)pps->seq_parameter_set_id);
+  if (!sps) {
+    LOG0("invalid SPS referenced\n");
+    return;
+  }
   assert(sps->sps_read); // TODO: error handling
 
 
-  LOG0("----------------- SLICE -----------------\n");
   LOG1("first_slice_segment_in_pic_flag      : %d\n", first_slice_segment_in_pic_flag);
   if (ctx->get_nal_unit_type() >= NAL_UNIT_BLA_W_LP &&
       ctx->get_nal_unit_type() <= NAL_UNIT_RESERVED_IRAP_VCL23) {
@@ -2573,6 +2582,11 @@ static int decode_rqt_root_cbf(thread_context* tctx)
 
 static int decode_ref_idx_lX(thread_context* tctx, int numRefIdxLXActive)
 {
+  // prevent endless loop when 'numRefIdxLXActive' is invalid
+  if (numRefIdxLXActive <= 1) {
+    return 0;
+  }
+
   logtrace(LogSlice,"# ref_idx_lX\n");
 
   int cMax = numRefIdxLXActive-1;
@@ -3387,7 +3401,7 @@ int residual_coding(thread_context* tctx,
         }
 
         if (pps.sign_data_hiding_flag && signHidden) {
-          sumAbsLevel += baseLevel + coeff_abs_level_remaining;
+          sumAbsLevel += currCoeff;
 
           if (n==nCoefficients-1 && (sumAbsLevel & 1)) {
             currCoeff = -currCoeff;
@@ -4173,6 +4187,11 @@ void read_pcm_samples_internal(thread_context* tctx, int x0, int y0, int log2CbS
   stride = tctx->img->get_image_stride(cIdx);
 
   int shift = bitDepth - nPcmBits;
+
+  // a shift < 0 may result when the SPS sequence header is broken
+  if (shift < 0) {
+    shift=0;
+  }
 
   for (int y=0;y<h;y++)
     for (int x=0;x<w;x++)

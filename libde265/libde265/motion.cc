@@ -292,6 +292,19 @@ void generate_inter_prediction_samples(base_context* ctx,
   const pic_parameter_set* pps = shdr->pps.get();
   const seq_parameter_set* sps = pps->sps.get();
 
+  if (sps->BitDepth_Y != img->get_bit_depth(0) ||
+      sps->BitDepth_C != img->get_bit_depth(1)) {
+    img->integrity = INTEGRITY_DECODING_ERRORS;
+    ctx->add_warning(DE265_WARNING_BIT_DEPTH_OF_CURRENT_IMAGE_DOES_NOT_MATCH_SPS, false);
+    return;
+  }
+
+  if (sps->chroma_format_idc != img->get_chroma_format()) {
+    img->integrity = INTEGRITY_DECODING_ERRORS;
+    ctx->add_warning(DE265_WARNING_CHROMA_OF_CURRENT_IMAGE_DOES_NOT_MATCH_SPS, false);
+    return;
+  }
+
   const int SubWidthC  = sps->SubWidthC;
   const int SubHeightC = sps->SubHeightC;
 
@@ -348,11 +361,26 @@ void generate_inter_prediction_samples(base_context* ctx,
 
       logtrace(LogMotion, "refIdx: %d -> dpb[%d]\n", vi->refIdx[l], shdr->RefPicList[l][vi->refIdx[l]]);
 
-      if (refPic->PicState == UnusedForReference) {
+      if (!refPic || refPic->PicState == UnusedForReference) {
         img->integrity = INTEGRITY_DECODING_ERRORS;
         ctx->add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED, false);
 
         // TODO: fill predSamplesC with black or grey
+      }
+      else if (refPic->get_width(0) != sps->pic_width_in_luma_samples ||
+               refPic->get_height(0) != sps->pic_height_in_luma_samples ||
+               img->get_chroma_format() != refPic->get_chroma_format()) {
+        img->integrity = INTEGRITY_DECODING_ERRORS;
+        ctx->add_warning(DE265_WARNING_REFERENCE_IMAGE_SIZE_DOES_NOT_MATCH_SPS, false);
+      }
+      else if (img->get_bit_depth(0) != refPic->get_bit_depth(0) ||
+               img->get_bit_depth(1) != refPic->get_bit_depth(1)) {
+        img->integrity = INTEGRITY_DECODING_ERRORS;
+        ctx->add_warning(DE265_WARNING_REFERENCE_IMAGE_BIT_DEPTH_DOES_NOT_MATCH, false);
+      }
+      else if (img->get_chroma_format() != refPic->get_chroma_format()) {
+        img->integrity = INTEGRITY_DECODING_ERRORS;
+        ctx->add_warning(DE265_WARNING_REFERENCE_IMAGE_CHROMA_FORMAT_DOES_NOT_MATCH, false);
       }
       else {
         // 8.5.3.2.2
@@ -376,21 +404,23 @@ void generate_inter_prediction_samples(base_context* ctx,
                   refPic->get_luma_stride(), nPbW,nPbH, bit_depth_L);
         }
 
-        if (img->high_bit_depth(0)) {
-          mc_chroma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                    predSamplesC[0][l],nCS, (const uint16_t*)refPic->get_image_plane(1),
-                    refPic->get_chroma_stride(), nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
-          mc_chroma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                    predSamplesC[1][l],nCS, (const uint16_t*)refPic->get_image_plane(2),
-                    refPic->get_chroma_stride(), nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
-        }
-        else {
-          mc_chroma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                    predSamplesC[0][l],nCS, (const uint8_t*)refPic->get_image_plane(1),
-                    refPic->get_chroma_stride(), nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
-          mc_chroma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP,yP,
-                    predSamplesC[1][l],nCS, (const uint8_t*)refPic->get_image_plane(2),
-                    refPic->get_chroma_stride(), nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
+        if (img->get_chroma_format() != de265_chroma_mono) {
+          if (img->high_bit_depth(1)) {
+            mc_chroma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP, yP,
+                      predSamplesC[0][l], nCS, (const uint16_t*) refPic->get_image_plane(1),
+                      refPic->get_chroma_stride(), nPbW / SubWidthC, nPbH / SubHeightC, bit_depth_C);
+            mc_chroma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP, yP,
+                      predSamplesC[1][l], nCS, (const uint16_t*) refPic->get_image_plane(2),
+                      refPic->get_chroma_stride(), nPbW / SubWidthC, nPbH / SubHeightC, bit_depth_C);
+          }
+          else {
+            mc_chroma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP, yP,
+                      predSamplesC[0][l], nCS, (const uint8_t*) refPic->get_image_plane(1),
+                      refPic->get_chroma_stride(), nPbW / SubWidthC, nPbH / SubHeightC, bit_depth_C);
+            mc_chroma(ctx, sps, vi->mv[l].x, vi->mv[l].y, xP, yP,
+                      predSamplesC[1][l], nCS, (const uint8_t*) refPic->get_image_plane(2),
+                      refPic->get_chroma_stride(), nPbW / SubWidthC, nPbH / SubHeightC, bit_depth_C);
+          }
         }
       }
     }
@@ -441,12 +471,15 @@ void generate_inter_prediction_samples(base_context* ctx,
       if (predFlag[0]==1 && predFlag[1]==0) {
         ctx->acceleration.put_unweighted_pred(pixels[0], stride[0],
                                               predSamplesL[0],nCS, nPbW,nPbH, bit_depth_L);
-        ctx->acceleration.put_unweighted_pred(pixels[1], stride[1],
-                                              predSamplesC[0][0],nCS,
-                                              nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
-        ctx->acceleration.put_unweighted_pred(pixels[2], stride[2],
-                                              predSamplesC[1][0],nCS,
-                                              nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
+
+        if (img->get_chroma_format() != de265_chroma_mono) {
+          ctx->acceleration.put_unweighted_pred(pixels[1], stride[1],
+                                                predSamplesC[0][0], nCS,
+                                                nPbW / SubWidthC, nPbH / SubHeightC, bit_depth_C);
+          ctx->acceleration.put_unweighted_pred(pixels[2], stride[2],
+                                                predSamplesC[1][0], nCS,
+                                                nPbW / SubWidthC, nPbH / SubHeightC, bit_depth_C);
+        }
       }
       else {
         ctx->add_warning(DE265_WARNING_BOTH_PREDFLAGS_ZERO, false);
@@ -476,12 +509,14 @@ void generate_inter_prediction_samples(base_context* ctx,
         ctx->acceleration.put_weighted_pred(pixels[0], stride[0],
                                             predSamplesL[0],nCS, nPbW,nPbH,
                                             luma_w0, luma_o0, luma_log2WD, bit_depth_L);
-        ctx->acceleration.put_weighted_pred(pixels[1], stride[1],
-                                            predSamplesC[0][0],nCS, nPbW/SubWidthC,nPbH/SubHeightC,
-                                            chroma0_w0, chroma0_o0, chroma_log2WD, bit_depth_C);
-        ctx->acceleration.put_weighted_pred(pixels[2], stride[2],
-                                            predSamplesC[1][0],nCS, nPbW/SubWidthC,nPbH/SubHeightC,
-                                            chroma1_w0, chroma1_o0, chroma_log2WD, bit_depth_C);
+        if (img->get_chroma_format() != de265_chroma_mono) {
+          ctx->acceleration.put_weighted_pred(pixels[1], stride[1],
+                                              predSamplesC[0][0], nCS, nPbW / SubWidthC, nPbH / SubHeightC,
+                                              chroma0_w0, chroma0_o0, chroma_log2WD, bit_depth_C);
+          ctx->acceleration.put_weighted_pred(pixels[2], stride[2],
+                                              predSamplesC[1][0], nCS, nPbW / SubWidthC, nPbH / SubHeightC,
+                                              chroma1_w0, chroma1_o0, chroma_log2WD, bit_depth_C);
+        }
       }
       else {
         ctx->add_warning(DE265_WARNING_BOTH_PREDFLAGS_ZERO, false);
@@ -508,12 +543,14 @@ void generate_inter_prediction_samples(base_context* ctx,
         int16_t* in10 = predSamplesC[1][0];
         int16_t* in11 = predSamplesC[1][1];
 
-        ctx->acceleration.put_weighted_pred_avg(pixels[1], stride[1],
-                                                in00,in01, nCS,
-                                                nPbW/SubWidthC, nPbH/SubHeightC, bit_depth_C);
-        ctx->acceleration.put_weighted_pred_avg(pixels[2], stride[2],
-                                                in10,in11, nCS,
-                                                nPbW/SubWidthC, nPbH/SubHeightC, bit_depth_C);
+        if (img->get_chroma_format() != de265_chroma_mono) {
+          ctx->acceleration.put_weighted_pred_avg(pixels[1], stride[1],
+                                                  in00, in01, nCS,
+                                                  nPbW / SubWidthC, nPbH / SubHeightC, bit_depth_C);
+          ctx->acceleration.put_weighted_pred_avg(pixels[2], stride[2],
+                                                  in10, in11, nCS,
+                                                  nPbW / SubWidthC, nPbH / SubHeightC, bit_depth_C);
+        }
       }
       else {
         // weighted prediction
@@ -555,16 +592,18 @@ void generate_inter_prediction_samples(base_context* ctx,
         int16_t* in10 = predSamplesC[1][0];
         int16_t* in11 = predSamplesC[1][1];
 
-        ctx->acceleration.put_weighted_bipred(pixels[1], stride[1],
-                                              in00,in01, nCS, nPbW/SubWidthC, nPbH/SubHeightC,
-                                              chroma0_w0,chroma0_o0,
-                                              chroma0_w1,chroma0_o1,
-                                              chroma_log2WD, bit_depth_C);
-        ctx->acceleration.put_weighted_bipred(pixels[2], stride[2],
-                                              in10,in11, nCS, nPbW/SubWidthC, nPbH/SubHeightC,
-                                              chroma1_w0,chroma1_o0,
-                                              chroma1_w1,chroma1_o1,
-                                              chroma_log2WD, bit_depth_C);
+        if (img->get_chroma_format() != de265_chroma_mono) {
+          ctx->acceleration.put_weighted_bipred(pixels[1], stride[1],
+                                                in00, in01, nCS, nPbW / SubWidthC, nPbH / SubHeightC,
+                                                chroma0_w0, chroma0_o0,
+                                                chroma0_w1, chroma0_o1,
+                                                chroma_log2WD, bit_depth_C);
+          ctx->acceleration.put_weighted_bipred(pixels[2], stride[2],
+                                                in10, in11, nCS, nPbW / SubWidthC, nPbH / SubHeightC,
+                                                chroma1_w0, chroma1_o0,
+                                                chroma1_w1, chroma1_o1,
+                                                chroma_log2WD, bit_depth_C);
+        }
       }
     }
     else if (predFlag[0]==1 || predFlag[1]==1) {
@@ -573,12 +612,15 @@ void generate_inter_prediction_samples(base_context* ctx,
       if (pps->weighted_bipred_flag==0) {
         ctx->acceleration.put_unweighted_pred(pixels[0], stride[0],
                                               predSamplesL[l],nCS, nPbW,nPbH, bit_depth_L);
-        ctx->acceleration.put_unweighted_pred(pixels[1], stride[1],
-                                              predSamplesC[0][l],nCS,
-                                              nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
-        ctx->acceleration.put_unweighted_pred(pixels[2], stride[2],
-                                              predSamplesC[1][l],nCS,
-                                              nPbW/SubWidthC,nPbH/SubHeightC, bit_depth_C);
+
+        if (img->get_chroma_format() != de265_chroma_mono) {
+          ctx->acceleration.put_unweighted_pred(pixels[1], stride[1],
+                                                predSamplesC[0][l], nCS,
+                                                nPbW / SubWidthC, nPbH / SubHeightC, bit_depth_C);
+          ctx->acceleration.put_unweighted_pred(pixels[2], stride[2],
+                                                predSamplesC[1][l], nCS,
+                                                nPbW / SubWidthC, nPbH / SubHeightC, bit_depth_C);
+        }
       }
       else {
         int refIdx = vi->refIdx[l];
@@ -599,14 +641,17 @@ void generate_inter_prediction_samples(base_context* ctx,
         ctx->acceleration.put_weighted_pred(pixels[0], stride[0],
                                             predSamplesL[l],nCS, nPbW,nPbH,
                                             luma_w, luma_o, luma_log2WD, bit_depth_L);
-        ctx->acceleration.put_weighted_pred(pixels[1], stride[1],
-                                            predSamplesC[0][l],nCS,
-                                            nPbW/SubWidthC,nPbH/SubHeightC,
-                                            chroma0_w, chroma0_o, chroma_log2WD, bit_depth_C);
-        ctx->acceleration.put_weighted_pred(pixels[2], stride[2],
-                                            predSamplesC[1][l],nCS,
-                                            nPbW/SubWidthC,nPbH/SubHeightC,
-                                            chroma1_w, chroma1_o, chroma_log2WD, bit_depth_C);
+
+        if (img->get_chroma_format() != de265_chroma_mono) {
+          ctx->acceleration.put_weighted_pred(pixels[1], stride[1],
+                                              predSamplesC[0][l], nCS,
+                                              nPbW / SubWidthC, nPbH / SubHeightC,
+                                              chroma0_w, chroma0_o, chroma_log2WD, bit_depth_C);
+          ctx->acceleration.put_weighted_pred(pixels[2], stride[2],
+                                              predSamplesC[1][l], nCS,
+                                              nPbW / SubWidthC, nPbH / SubHeightC,
+                                              chroma1_w, chroma1_o, chroma_log2WD, bit_depth_C);
+        }
       }
     }
     else {
@@ -1211,6 +1256,16 @@ void derive_collocated_motion_vectors(base_context* ctx,
 
 
 
+  int slice_hdr_idx = colImg->get_SliceHeaderIndex(xColPb,yColPb);
+  if (slice_hdr_idx >= colImg->slices.size()) {
+    ctx->add_warning(DE265_WARNING_INVALID_SLICE_HEADER_INDEX_ACCESS, false);
+
+    *out_availableFlagLXCol = 0;
+    out_mvLXCol->x = 0;
+    out_mvLXCol->y = 0;
+    return;
+  }
+
   const slice_segment_header* colShdr = colImg->slices[ colImg->get_SliceHeaderIndex(xColPb,yColPb) ];
 
   if (shdr->LongTermRefPic[X][refIdxLX] !=
@@ -1591,6 +1646,17 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
                                            uint8_t out_availableFlagLXN[2],
                                            MotionVector out_mvLXN[2])
 {
+  if (refIdxLX >= MAX_NUM_REF_PICS) {
+    ctx->add_warning(DE265_WARNING_INCORRECT_MOTION_VECTOR_SCALING, false);
+    img->integrity = INTEGRITY_DECODING_ERRORS;
+
+    out_availableFlagLXN[0] = false;
+    out_availableFlagLXN[1] = false;
+    out_mvLXN[0] = MotionVector();
+    out_mvLXN[1] = MotionVector();
+    return;
+  }
+
   int isScaledFlagLX = 0;
 
   const int A=0;
@@ -1638,6 +1704,7 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
   const int referenced_POC = tmpimg->PicOrderCntVal;
 
   for (int k=0;k<=1;k++) {
+
     if (availableA[k] &&
         out_availableFlagLXN[A]==0 && // no A?-predictor so far
         img->get_pred_mode(xA[k],yA[k]) != MODE_INTRA) {
@@ -1649,9 +1716,24 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
       logmvcand(vi);
 
       const de265_image* imgX = NULL;
-      if (vi.predFlag[X]) imgX = ctx->get_image(shdr->RefPicList[X][ vi.refIdx[X] ]);
+      if (vi.predFlag[X]) {
+        // check for input data validity
+        if (vi.refIdx[X]<0 || vi.refIdx[X] >= MAX_NUM_REF_PICS) {
+          return;
+        }
+
+        imgX = ctx->get_image(shdr->RefPicList[X][ vi.refIdx[X] ]);
+      }
+
       const de265_image* imgY = NULL;
-      if (vi.predFlag[Y]) imgY = ctx->get_image(shdr->RefPicList[Y][ vi.refIdx[Y] ]);
+      if (vi.predFlag[Y]) {
+        // check for input data validity
+        if (vi.refIdx[Y]<0 || vi.refIdx[Y] >= MAX_NUM_REF_PICS) {
+          return;
+        }
+
+        imgY = ctx->get_image(shdr->RefPicList[Y][ vi.refIdx[Y] ]);
+      }
 
       // check whether the predictor X is available and references the same POC
       if (vi.predFlag[X] && imgX && imgX->PicOrderCntVal == referenced_POC) {
@@ -1747,7 +1829,6 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
     }
   }
 
-
   // --- B ---
 
   // 1.
@@ -1782,11 +1863,23 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
       logtrace(LogMotion,"MVP B%d=\n",k);
       logmvcand(vi);
 
-
       const de265_image* imgX = NULL;
-      if (vi.predFlag[X]) imgX = ctx->get_image(shdr->RefPicList[X][ vi.refIdx[X] ]);
+      if (vi.predFlag[X]) {
+        if (vi.refIdx[X] < 0 || vi.refIdx[X] >= MAX_NUM_REF_PICS) {
+          return;
+        }
+
+        imgX = ctx->get_image(shdr->RefPicList[X][ vi.refIdx[X] ]);
+      }
+
       const de265_image* imgY = NULL;
-      if (vi.predFlag[Y]) imgY = ctx->get_image(shdr->RefPicList[Y][ vi.refIdx[Y] ]);
+      if (vi.predFlag[Y]) {
+        if (vi.refIdx[Y] < 0 || vi.refIdx[Y] >= MAX_NUM_REF_PICS) {
+          return;
+        }
+
+        imgY = ctx->get_image(shdr->RefPicList[Y][ vi.refIdx[Y] ]);
+      }
 
       if (vi.predFlag[X] && imgX && imgX->PicOrderCntVal == referenced_POC) {
         logtrace(LogMotion,"a) take B%d/L%d as B candidate with same POC\n",k,X);
@@ -1834,6 +1927,12 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
         int Y=1-X;
 
         const PBMotion& vi = img->get_mv_info(xB[k],yB[k]);
+
+        if (vi.refIdx[X] >= MAX_NUM_REF_PICS) {
+          img->integrity = INTEGRITY_DECODING_ERRORS;
+          ctx->add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED, false);
+          return; // error   // TODO: we actually should make sure that this is never set to an out-of-range value
+        }
 
         if (vi.predFlag[X]==1 &&
             shdr->LongTermRefPic[X][refIdxLX] == shdr->LongTermRefPic[X][ vi.refIdx[X] ]) {
@@ -2044,6 +2143,14 @@ void motion_vectors_and_ref_indices(base_context* ctx,
           (inter_pred_idc == PRED_L1 && l==1)) {
         out_vi->refIdx[l] = motion.refIdx[l];
         out_vi->predFlag[l] = 1;
+
+        if (motion.refIdx[l] >= MAX_NUM_REF_PICS) {
+          out_vi->refIdx[l] = 0;
+
+          img->integrity = INTEGRITY_DECODING_ERRORS;
+          ctx->add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED, false);
+          return;
+        }
       }
       else {
         out_vi->refIdx[l] = -1;

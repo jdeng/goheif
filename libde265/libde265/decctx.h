@@ -203,7 +203,7 @@ public:
   std::vector<sei_message> suffix_SEIs;
 
   slice_unit* get_next_unprocessed_slice_segment() const {
-    for (int i=0;i<slice_units.size();i++) {
+    for (size_t i=0;i<slice_units.size();i++) {
       if (slice_units[i]->state == slice_unit::Unprocessed) {
         return slice_units[i];
       }
@@ -213,7 +213,7 @@ public:
   }
 
   slice_unit* get_prev_slice_segment(slice_unit* s) const {
-    for (int i=1; i<slice_units.size(); i++) {
+    for (size_t i=1; i<slice_units.size(); i++) {
       if (slice_units[i]==s) {
         return slice_units[i-1];
       }
@@ -223,7 +223,7 @@ public:
   }
 
   slice_unit* get_next_slice_segment(slice_unit* s) const {
-    for (int i=0; i<slice_units.size()-1; i++) {
+    for (size_t i=0; i<slice_units.size()-1; i++) {
       if (slice_units[i]==s) {
         return slice_units[i+1];
       }
@@ -233,8 +233,8 @@ public:
   }
 
   void dump_slices() const {
-    for (int i=0; i<slice_units.size(); i++) {
-      printf("[%d] = %p\n",i,slice_units[i]);
+    for (size_t i=0; i<slice_units.size(); i++) {
+      printf("[%zu] = %p\n",i,slice_units[i]);
     }
   }
 
@@ -451,7 +451,7 @@ class decoder_context : public base_context {
 
  public:
   const slice_segment_header* previous_slice_header; /* Remember the last slice for a successive
-                                                        dependent slice. */
+								  dependent slice. */
 
 
   // --- motion compensation ---
@@ -513,9 +513,14 @@ class decoder_context : public base_context {
                                      int progress);
 
   void process_picture_order_count(slice_segment_header* hdr);
+
+  /*
+  If there is no space for a new image, returns the negative value of an de265_error.
+  I.e. you can check for error by return_value<0, which is error (-return_value);
+   */
   int generate_unavailable_reference_picture(const seq_parameter_set* sps,
                                              int POC, bool longTerm);
-  void process_reference_picture_set(slice_segment_header* hdr);
+  de265_error process_reference_picture_set(slice_segment_header* hdr);
   bool construct_reference_picture_lists(slice_segment_header* hdr);
 
 

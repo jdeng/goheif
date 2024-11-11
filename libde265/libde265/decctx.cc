@@ -186,11 +186,11 @@ image_unit::image_unit()
 
 image_unit::~image_unit()
 {
-  for (int i=0;i<slice_units.size();i++) {
+  for (size_t i=0;i<slice_units.size();i++) {
     delete slice_units[i];
   }
 
-  for (int i=0;i<tasks.size();i++) {
+  for (size_t i=0;i<tasks.size();i++) {
     delete tasks[i];
   }
 }
@@ -265,6 +265,7 @@ decoder_context::decoder_context()
   prevPicOrderCntLsb = 0;
   prevPicOrderCntMsb = 0;
   img = NULL;
+  previous_slice_header = nullptr;
 
   /*
   int PocLsbLt[MAX_NUM_REF_PICS];
@@ -562,6 +563,15 @@ de265_error decoder_context::read_sps_NAL(bitreader& reader)
 
   sps[ new_sps->seq_parameter_set_id ] = new_sps;
 
+  // Remove the all PPS that referenced the old SPS because parameters may have changed and we do not want to
+  // get the SPS and PPS parameters (e.g. image size) out of sync.
+  
+  for (auto& p : pps) {
+    if (p && p->seq_parameter_set_id == new_sps->seq_parameter_set_id) {
+      p = nullptr;
+    }
+  }
+
   return DE265_OK;
 }
 
@@ -572,16 +582,17 @@ de265_error decoder_context::read_pps_NAL(bitreader& reader)
   std::shared_ptr<pic_parameter_set> new_pps = std::make_shared<pic_parameter_set>();
 
   bool success = new_pps->read(&reader,this);
+  if (!success) {
+    return DE265_WARNING_PPS_HEADER_INVALID;
+  }
 
   if (param_pps_headers_fd>=0) {
     new_pps->dump(param_pps_headers_fd);
   }
 
-  if (success) {
-    pps[ (int)new_pps->pic_parameter_set_id ] = new_pps;
-  }
+  pps[ (int)new_pps->pic_parameter_set_id ] = new_pps;
 
-  return success ? DE265_OK : DE265_WARNING_PPS_HEADER_INVALID;
+  return DE265_OK;
 }
 
 de265_error decoder_context::read_sei_NAL(bitreader& reader, bool suffix)
@@ -693,7 +704,7 @@ de265_error decoder_context::read_slice_NAL(bitreader& reader, NAL_unit* nal, na
 
 template <class T> void pop_front(std::vector<T>& vec)
 {
-  for (int i=1;i<vec.size();i++)
+  for (size_t i=1;i<vec.size();i++)
     vec[i-1] = vec[i];
 
   vec.pop_back();
@@ -770,7 +781,7 @@ de265_error decoder_context::decode_some(bool* did_work)
 
     // process suffix SEIs
 
-    for (int i=0;i<imgunit->suffix_SEIs.size();i++) {
+    for (size_t i=0;i<imgunit->suffix_SEIs.size();i++) {
       const sei_message& sei = imgunit->suffix_SEIs[i];
 
       err = process_sei(&sei, imgunit->img);
@@ -1083,7 +1094,7 @@ de265_error decoder_context::decode_slice_unit_WPP(image_unit* imgunit,
 
   img->wait_for_completion();
 
-  for (int i=0;i<imgunit->tasks.size();i++)
+  for (size_t i=0;i<imgunit->tasks.size();i++)
     delete imgunit->tasks[i];
   imgunit->tasks.clear();
 
@@ -1173,7 +1184,7 @@ de265_error decoder_context::decode_slice_unit_tiles(image_unit* imgunit,
 
   img->wait_for_completion();
 
-  for (int i=0;i<imgunit->tasks.size();i++)
+  for (size_t i=0;i<imgunit->tasks.size();i++)
     delete imgunit->tasks[i];
   imgunit->tasks.clear();
 
@@ -1416,8 +1427,9 @@ int decoder_context::generate_unavailable_reference_picture(const seq_parameter_
   std::shared_ptr<const seq_parameter_set> current_sps = this->sps[ (int)current_pps->seq_parameter_set_id ];
 
   int idx = dpb.new_image(current_sps, this, 0,0, false);
-  assert(idx>=0);
-  //printf("-> fill with unavailable POC %d\n",POC);
+  if (idx<0) {
+    return idx;
+  }
 
   de265_image* img = dpb.get_image(idx);
 
@@ -1441,7 +1453,7 @@ int decoder_context::generate_unavailable_reference_picture(const seq_parameter_
 
    This function will mark pictures in the DPB as 'unused' or 'used for long-term reference'
  */
-void decoder_context::process_reference_picture_set(slice_segment_header* hdr)
+de265_error decoder_context::process_reference_picture_set(slice_segment_header* hdr)
 {
   std::vector<int> removeReferencesList;
 
@@ -1463,7 +1475,7 @@ void decoder_context::process_reference_picture_set(slice_segment_header* hdr)
        lower POCs seems to be compliant to the reference decoder.
     */
 
-    for (int i=0;i<dpb.size();i++) {
+    for (size_t i=0;i<dpb.size();i++) {
       de265_image* img = dpb.get_image(i);
 
       if (img->PicState != UnusedForReference &&
@@ -1589,6 +1601,9 @@ void decoder_context::process_reference_picture_set(slice_segment_header* hdr)
       // We do not know the correct MSB
       int concealedPicture = generate_unavailable_reference_picture(current_sps.get(),
                                                                     PocLtCurr[i], true);
+      if (concealedPicture<0) {
+        return (de265_error)(-concealedPicture);
+      }
       picInAnyList.resize(dpb.size(), false); // adjust size of array to hold new picture
 
       RefPicSetLtCurr[i] = k = concealedPicture;
@@ -1615,6 +1630,9 @@ void decoder_context::process_reference_picture_set(slice_segment_header* hdr)
     else {
       int concealedPicture = k = generate_unavailable_reference_picture(current_sps.get(),
                                                                         PocLtFoll[i], true);
+      if (concealedPicture<0) {
+        return (de265_error)(-concealedPicture);
+      }
       picInAnyList.resize(dpb.size(), false); // adjust size of array to hold new picture
 
       RefPicSetLtFoll[i] = concealedPicture;
@@ -1646,6 +1664,9 @@ void decoder_context::process_reference_picture_set(slice_segment_header* hdr)
     else {
       int concealedPicture = generate_unavailable_reference_picture(current_sps.get(),
                                                                     PocStCurrBefore[i], false);
+      if (concealedPicture<0) {
+        return (de265_error)(-concealedPicture);
+      }
       RefPicSetStCurrBefore[i] = k = concealedPicture;
 
       picInAnyList.resize(dpb.size(), false); // adjust size of array to hold new picture
@@ -1669,6 +1690,9 @@ void decoder_context::process_reference_picture_set(slice_segment_header* hdr)
     else {
       int concealedPicture = generate_unavailable_reference_picture(current_sps.get(),
                                                                     PocStCurrAfter[i], false);
+      if (concealedPicture<0) {
+        return (de265_error)(-concealedPicture);
+      }
       RefPicSetStCurrAfter[i] = k = concealedPicture;
 
 
@@ -1712,6 +1736,8 @@ void decoder_context::process_reference_picture_set(slice_segment_header* hdr)
   hdr->RemoveReferencesList = removeReferencesList;
 
   //remove_images_from_dpb(hdr->RemoveReferencesList);
+
+  return DE265_OK;
 }
 
 
@@ -1979,9 +2005,10 @@ bool decoder_context::process_slice_segment_header(slice_segment_header* hdr,
   // get PPS and SPS for this slice
 
   int pps_id = hdr->slice_pic_parameter_set_id;
-  if (pps[pps_id]->pps_read==false) {
+  if (pps[pps_id]==nullptr || pps[pps_id]->pps_read==false) {
     logerror(LogHeaders, "PPS %d has not been read\n", pps_id);
-    assert(false); // TODO
+    img->decctx->add_warning(DE265_WARNING_NONEXISTING_PPS_REFERENCED, false);
+    return false;
   }
 
   current_pps = pps[pps_id];
@@ -2010,8 +2037,8 @@ bool decoder_context::process_slice_segment_header(slice_segment_header* hdr,
     int image_buffer_idx;
     bool isOutputImage = (!sps->sample_adaptive_offset_enabled_flag || param_disable_sao);
     image_buffer_idx = dpb.new_image(current_sps, this, pts, user_data, isOutputImage);
-    if (image_buffer_idx == -1) {
-      *err = DE265_ERROR_IMAGE_BUFFER_FULL;
+    if (image_buffer_idx < 0) {
+      *err = (de265_error)(-image_buffer_idx);
       return false;
     }
 
@@ -2063,7 +2090,10 @@ bool decoder_context::process_slice_segment_header(slice_segment_header* hdr,
       // mark picture so that it is not overwritten by unavailable reference frames
       img->PicState = UsedForShortTermReference;
 
-      process_reference_picture_set(hdr);
+      *err = process_reference_picture_set(hdr);
+      if (*err != DE265_OK) {
+        return false;
+      }
     }
 
     img->PicState = UsedForShortTermReference;
@@ -2115,7 +2145,7 @@ bool decoder_context::process_slice_segment_header(slice_segment_header* hdr,
 
 void decoder_context::remove_images_from_dpb(const std::vector<int>& removeImageList)
 {
-  for (int i=0;i<removeImageList.size();i++) {
+  for (size_t i=0;i<removeImageList.size();i++) {
     int idx = dpb.DPB_index_of_picture_with_ID( removeImageList[i] );
     if (idx>=0) {
       //printf("remove ID %d\n", removeImageList[i]);

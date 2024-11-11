@@ -35,9 +35,9 @@ class error_queue;
 // #define MAX_REF_PIC_SETS 64  // maximum according to standard
 #define MAX_NUM_LT_REF_PICS_SPS 32
 
-// this is just a safety range
-#define MAX_PICTURE_WIDTH  70000
-#define MAX_PICTURE_HEIGHT 70000
+// This is just a safety range. It is chosen such that width/height fits into 16bit integers and the total number of pixels in 32bit integers.
+#define MAX_PICTURE_WIDTH  65535
+#define MAX_PICTURE_HEIGHT 65535
 
 enum {
   CHROMA_MONO = 0,
@@ -54,7 +54,7 @@ typedef struct scaling_list_data {
   uint8_t ScalingFactor_Size0[6][4][4];
   uint8_t ScalingFactor_Size1[6][8][8];
   uint8_t ScalingFactor_Size2[6][16][16];
-  uint8_t ScalingFactor_Size3[2][32][32];
+  uint8_t ScalingFactor_Size3[6][32][32];
 } scaling_list_data;
 
 
@@ -210,7 +210,7 @@ public:
   int PicHeightInCtbsY;
   int PicSizeInMinCbsY;
   int PicSizeInCtbsY;
-  int PicSizeInSamplesY;
+  uint32_t PicSizeInSamplesY;
 
   int CtbWidthC, CtbHeightC;
 

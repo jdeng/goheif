@@ -4,9 +4,13 @@
 #else
 #define HAVE_POSIX_MEMALIGN 1
 #endif
+
+#ifndef HAVE_ARM
 #define HAVE_SSE4_1 1
-// #define HAVE_ARM
-// #define HAVE_NEON
+#else
+#define HAVE_NEON 1
+#endif
+
 
 #include "alloc_pool.cc"
 #include "bitstream.cc"
