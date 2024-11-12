@@ -7,10 +7,8 @@
 
 #ifndef HAVE_ARM
 #define HAVE_SSE4_1 1
-#else
-#define HAVE_NEON 1
 #endif
-
+//#define HAVE_NEON 1 // disable NEON for ARM as cgo wont compile the .S files
 
 #include "alloc_pool.cc"
 #include "bitstream.cc"
