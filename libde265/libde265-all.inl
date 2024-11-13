@@ -5,9 +5,6 @@
 #define HAVE_POSIX_MEMALIGN 1
 #endif
 
-#ifndef HAVE_ARM
-#define HAVE_SSE4_1 1
-#endif
 //#define HAVE_NEON 1 // disable NEON for ARM as cgo wont compile the .S files
 
 #include "alloc_pool.cc"

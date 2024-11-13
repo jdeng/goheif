@@ -2,11 +2,11 @@ package goheif
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
 	"io"
-	"io/ioutil"
 
 	"github.com/jdeng/goheif/heif"
 	"github.com/jdeng/goheif/libde265"
@@ -48,12 +48,12 @@ func newGridBox(data []byte) (*gridBox, error) {
 
 func decodeHevcItem(dec *libde265.Decoder, hf *heif.File, item *heif.Item) (*image.YCbCr, error) {
 	if item.Info.ItemType != "hvc1" {
-		return nil, fmt.Errorf("Unsupported item type: %s", item.Info.ItemType)
+		return nil, fmt.Errorf("unsupported item type: %s", item.Info.ItemType)
 	}
 
 	hvcc, ok := item.HevcConfig()
 	if !ok {
-		return nil, fmt.Errorf("No hvcC")
+		return nil, errors.New("no hvcC")
 	}
 
 	hdr := hvcc.AsHeader()
@@ -71,7 +71,7 @@ func decodeHevcItem(dec *libde265.Decoder, hf *heif.File, item *heif.Item) (*ima
 
 	ycc, ok := tile.(*image.YCbCr)
 	if !ok {
-		return nil, fmt.Errorf("Tile is not YCbCr")
+		return nil, errors.New("tile is not YCbCr")
 	}
 
 	return ycc, nil
@@ -97,11 +97,11 @@ func Decode(r io.Reader) (image.Image, error) {
 
 	width, height, ok := it.SpatialExtents()
 	if !ok {
-		return nil, fmt.Errorf("No dimension")
+		return nil, errors.New("no dimension")
 	}
 
 	if it.Info == nil {
-		return nil, fmt.Errorf("No item info")
+		return nil, errors.New("no item info")
 	}
 
 	dec, err := libde265.NewDecoder(libde265.WithSafeEncoding(SafeEncoding))
@@ -114,7 +114,7 @@ func Decode(r io.Reader) (image.Image, error) {
 	}
 
 	if it.Info.ItemType != "grid" {
-		return nil, fmt.Errorf("No grid")
+		return nil, errors.New("no grid")
 	}
 
 	data, err := hf.GetItemData(it)
@@ -129,17 +129,17 @@ func Decode(r io.Reader) (image.Image, error) {
 
 	dimg := it.Reference("dimg")
 	if dimg == nil {
-		return nil, fmt.Errorf("No dimg")
+		return nil, errors.New("no dimg")
 	}
 
 	if len(dimg.ToItemIDs) != grid.columns*grid.rows {
-		return nil, fmt.Errorf("Tiles number not matched")
+		return nil, fmt.Errorf("tiles number not matched: %d != %d", len(dimg.ToItemIDs), grid.columns*grid.rows)
 	}
 
 	var out *image.YCbCr
 	var tileWidth, tileHeight int
-	for i, y := 0, 0; y < grid.rows; y += 1 {
-		for x := 0; x < grid.columns; x += 1 {
+	for i, y := 0, 0; y < grid.rows; y++ {
+		for x := 0; x < grid.columns; x++ {
 			id := dimg.ToItemIDs[i]
 			item, err := hf.ItemByID(id)
 			if err != nil {
@@ -154,29 +154,29 @@ func Decode(r io.Reader) (image.Image, error) {
 			rect := ycc.Bounds()
 			if tileWidth == 0 {
 				tileWidth, tileHeight = rect.Dx(), rect.Dy()
-				width, height := tileWidth*grid.columns, tileHeight*grid.rows
-				out = image.NewYCbCr(image.Rectangle{image.Pt(0, 0), image.Pt(width, height)}, ycc.SubsampleRatio)
+				xwidth, xheight := tileWidth*grid.columns, tileHeight*grid.rows
+				out = image.NewYCbCr(image.Rectangle{image.Pt(0, 0), image.Pt(xwidth, xheight)}, ycc.SubsampleRatio)
 			}
 
 			if tileWidth != rect.Dx() || tileHeight != rect.Dy() {
-				return nil, fmt.Errorf("Inconsistent tile dimensions")
+				return nil, errors.New("inconsistent tile dimensions")
 			}
 
 			// copy y stride data
-			for i := 0; i < rect.Dy(); i += 1 {
-				copy(out.Y[(y*tileHeight+i)*out.YStride+x*ycc.YStride:], ycc.Y[i*ycc.YStride:(i+1)*ycc.YStride])
+			for j := 0; j < rect.Dy(); j += 1 {
+				copy(out.Y[(y*tileHeight+j)*out.YStride+x*ycc.YStride:], ycc.Y[j*ycc.YStride:(j+1)*ycc.YStride])
 			}
 
 			// height of c strides
 			cHeight := len(ycc.Cb) / ycc.CStride
 
 			// copy c stride data
-			for i := 0; i < cHeight; i += 1 {
-				copy(out.Cb[(y*cHeight+i)*out.CStride+x*ycc.CStride:], ycc.Cb[i*ycc.CStride:(i+1)*ycc.CStride])
-				copy(out.Cr[(y*cHeight+i)*out.CStride+x*ycc.CStride:], ycc.Cr[i*ycc.CStride:(i+1)*ycc.CStride])
+			for j := 0; j < cHeight; j += 1 {
+				copy(out.Cb[(y*cHeight+j)*out.CStride+x*ycc.CStride:], ycc.Cb[j*ycc.CStride:(j+1)*ycc.CStride])
+				copy(out.Cr[(y*cHeight+j)*out.CStride+x*ycc.CStride:], ycc.Cr[j*ycc.CStride:(j+1)*ycc.CStride])
 			}
 
-			i += 1
+			i++
 		}
 	}
 
@@ -202,7 +202,7 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 
 	width, height, ok := it.SpatialExtents()
 	if !ok {
-		return config, fmt.Errorf("No dimension")
+		return config, errors.New("no dimension")
 	}
 
 	config = image.Config{
@@ -218,7 +218,7 @@ func asReaderAt(r io.Reader) (io.ReaderAt, error) {
 		return ra, nil
 	}
 
-	b, err := ioutil.ReadAll(r)
+	b, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
 	}

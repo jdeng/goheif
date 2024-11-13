@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"image"
 	"io"
-	"io/ioutil"
+	"os"
 	"testing"
 )
 
 func TestFormatRegistered(t *testing.T) {
-	b, err := ioutil.ReadFile("testdata/camel.heic")
+	b, err := os.ReadFile("testdata/camel.heic")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func benchEncoding(b *testing.B, safe bool) {
 	}()
 	SafeEncoding = safe
 
-	f, err := ioutil.ReadFile("testdata/camel.heic")
+	f, err := os.ReadFile("testdata/camel.heic")
 	if err != nil {
 		b.Fatal(err)
 	}
