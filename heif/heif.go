@@ -24,9 +24,10 @@ package heif
 import (
 	"errors"
 	"fmt"
-	"github.com/jdeng/goheif/heif/bmff"
 	"io"
 	"log"
+
+	"github.com/jdeng/goheif/heif/bmff"
 )
 
 // File represents a HEIF file.
@@ -236,12 +237,31 @@ func (f *File) getMeta() (*BoxMeta, error) {
 	}
 	meta.FileType = pbox.(*bmff.FileTypeBox)
 
-	pbox, err = bmr.ReadAndParseBox(bmff.TypeMeta)
+	for {
+		var box bmff.Box
+		box, err = bmr.ReadBox()
+		if err != nil {
+			break
+		}
+
+		// skip mdat boxes if they are before meta
+		if box.Type() == bmff.TypeMdat {
+			continue
+		}
+
+		if box.Type() == bmff.TypeMeta {
+			pbox, err = box.Parse()
+			break
+		}
+
+		return nil, fmt.Errorf("error reading %q box: got box type %q instead", bmff.TypeMeta, box.Type())
+	}
+
 	if err != nil {
 		return nil, f.setMetaErr(err)
 	}
-	metabox := pbox.(*bmff.MetaBox)
 
+	metabox := pbox.(*bmff.MetaBox)
 	for _, box := range metabox.Children {
 		boxp, err := box.Parse()
 		if err == bmff.ErrUnknownBox {

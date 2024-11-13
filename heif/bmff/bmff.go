@@ -56,6 +56,7 @@ type BoxType [4]byte
 var (
 	TypeFtyp = BoxType{'f', 't', 'y', 'p'}
 	TypeMeta = BoxType{'m', 'e', 't', 'a'}
+	TypeMdat = BoxType{'m', 'd', 'a', 't'}
 )
 
 func (t BoxType) String() string { return string(t[:]) }
