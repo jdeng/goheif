@@ -2453,8 +2453,6 @@ static int decode_coeff_abs_level_greater2(thread_context* tctx,
 }
 
 
-#define MAX_PREFIX 64
-
 static int decode_coeff_abs_level_remaining(thread_context* tctx,
                                             int cRiceParam)
 {
@@ -2466,7 +2464,7 @@ static int decode_coeff_abs_level_remaining(thread_context* tctx,
     prefix++;
     codeword = decode_CABAC_bypass(&tctx->cabac_decoder);
 
-    if (prefix>MAX_PREFIX) {
+    if (prefix>64) {
       return 0; // TODO: error
     }
   }
