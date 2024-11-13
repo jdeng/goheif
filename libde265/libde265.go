@@ -156,9 +156,14 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 				ycc.Cb = C.GoBytes(unsafe.Pointer(cb), C.int(cheight*cstride))
 				ycc.Cr = C.GoBytes(unsafe.Pointer(cr), C.int(cheight*cstride))
 			} else {
-				ycc.Y = (*[1 << 30]byte)(unsafe.Pointer(y))[:int(height)*int(ystride)]
-				ycc.Cb = (*[1 << 30]byte)(unsafe.Pointer(cb))[:int(cheight)*int(cstride)]
-				ycc.Cr = (*[1 << 30]byte)(unsafe.Pointer(cr))[:int(cheight)*int(cstride)]
+				// Calculate the exact sizes needed
+				ySize := int(height) * int(ystride)
+				cSize := int(cheight) * int(cstride)
+
+				// Create slices directly from pointers with exact sizes
+				ycc.Y = unsafe.Slice((*byte)(y), ySize)
+				ycc.Cb = unsafe.Slice((*byte)(cb), cSize)
+				ycc.Cr = unsafe.Slice((*byte)(cr), cSize)
 			}
 
 			//C.de265_release_next_picture(dec.ctx)
