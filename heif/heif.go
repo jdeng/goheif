@@ -212,7 +212,8 @@ func (f *File) GetItemData(it *Item) ([]byte, error) {
 }
 
 func (f *File) setMetaErr(err error) error {
-	if f.metaErr != nil {
+	// preserve the first error encountered while parsing metadata
+	if f.metaErr == nil {
 		f.metaErr = err
 	}
 	return err
