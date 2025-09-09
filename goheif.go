@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"io"
 
+	"github.com/jdeng/goheif/dav1d"
 	"github.com/jdeng/goheif/heif"
 	"github.com/jdeng/goheif/libde265"
 )
@@ -77,6 +78,25 @@ func decodeHevcItem(dec *libde265.Decoder, hf *heif.File, item *heif.Item) (*ima
 	return ycc, nil
 }
 
+func decodeAv1Item(dec *dav1d.Decoder, hf *heif.File, item *heif.Item) (image.Image, error) {
+	if item.Info.ItemType != "av01" {
+		return nil, fmt.Errorf("unsupported item type: %s", item.Info.ItemType)
+	}
+
+	data, err := hf.GetItemData(item)
+	if err != nil {
+		return nil, err
+	}
+
+	dec.Reset()
+	img, err := dec.DecodeImage(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return img, nil
+}
+
 func ExtractExif(ra io.ReaderAt) ([]byte, error) {
 	hf := heif.Open(ra)
 	return hf.EXIF()
@@ -104,13 +124,24 @@ func Decode(r io.Reader) (image.Image, error) {
 		return nil, errors.New("no item info")
 	}
 
-	dec, err := libde265.NewDecoder(libde265.WithSafeEncoding(SafeEncoding))
-	if err != nil {
-		return nil, err
+	// Handle AV1 items
+	if it.Info.ItemType == "av01" {
+		av1Dec, err := dav1d.NewDecoder(dav1d.WithSafeEncoding(SafeEncoding))
+		if err != nil {
+			return nil, err
+		}
+		defer av1Dec.Free()
+		return decodeAv1Item(av1Dec, hf, it)
 	}
-	defer dec.Free()
+
+	// Handle HEVC items
 	if it.Info.ItemType == "hvc1" {
-		return decodeHevcItem(dec, hf, it)
+		hevcDec, err := libde265.NewDecoder(libde265.WithSafeEncoding(SafeEncoding))
+		if err != nil {
+			return nil, err
+		}
+		defer hevcDec.Free()
+		return decodeHevcItem(hevcDec, hf, it)
 	}
 
 	if it.Info.ItemType != "grid" {
@@ -138,6 +169,9 @@ func Decode(r io.Reader) (image.Image, error) {
 
 	var out *image.YCbCr
 	var tileWidth, tileHeight int
+	var hevcDec *libde265.Decoder
+	var av1Dec *dav1d.Decoder
+
 	for i, y := 0, 0; y < grid.rows; y++ {
 		for x := 0; x < grid.columns; x++ {
 			id := dimg.ToItemIDs[i]
@@ -146,9 +180,37 @@ func Decode(r io.Reader) (image.Image, error) {
 				return nil, err
 			}
 
-			ycc, err := decodeHevcItem(dec, hf, item)
+			var img image.Image
+			// Decode based on item type
+			if item.Info.ItemType == "av01" {
+				if av1Dec == nil {
+					av1Dec, err = dav1d.NewDecoder(dav1d.WithSafeEncoding(SafeEncoding))
+					if err != nil {
+						return nil, err
+					}
+					defer av1Dec.Free()
+				}
+				img, err = decodeAv1Item(av1Dec, hf, item)
+			} else if item.Info.ItemType == "hvc1" {
+				if hevcDec == nil {
+					hevcDec, err = libde265.NewDecoder(libde265.WithSafeEncoding(SafeEncoding))
+					if err != nil {
+						return nil, err
+					}
+					defer hevcDec.Free()
+				}
+				img, err = decodeHevcItem(hevcDec, hf, item)
+			} else {
+				return nil, fmt.Errorf("unsupported tile item type: %s", item.Info.ItemType)
+			}
+
 			if err != nil {
 				return nil, err
+			}
+
+			ycc, ok := img.(*image.YCbCr)
+			if !ok {
+				return nil, errors.New("tile is not YCbCr")
 			}
 
 			rect := ycc.Bounds()

@@ -121,6 +121,7 @@ var parsers = map[BoxType]parserFunc{
 	boxType("idat"): parseItemDataBox,
 	boxType("iref"): parseItemReferenceBox,
 	boxType("hvcC"): parseItemHevcConfigBox,
+	boxType("av1C"): parseItemAv1ConfigBox,
 }
 
 type box struct {
@@ -368,6 +369,7 @@ func parseItemInfoEntry(outer *box, br *bufReader) (Box, error) {
 		return nil, err
 	}
 	ie.ItemType = string(buf[:4])
+	br.Discard(4) // CRITICAL: Must discard the 4 bytes we peeked
 	ie.Name, _ = br.readString()
 
 	switch ie.ItemType {
@@ -378,6 +380,8 @@ func parseItemInfoEntry(outer *box, br *bufReader) (Box, error) {
 		}
 	case "uri ":
 		ie.ItemURIType, _ = br.readString()
+	default:
+		// Handle av01 and other unknown item types - just continue
 	}
 	if !br.ok() {
 		return nil, br.err
@@ -399,7 +403,7 @@ func parseItemInfoBox(outer *box, br *bufReader) (Box, error) {
 	}
 	ib := &ItemInfoBox{FullBox: fb}
 
-	if ib.Version > 1 {
+	if ib.Version >= 1 {
 		ib.Count, _ = br.readUint32()
 	} else {
 		count, _ := br.readUint16()
@@ -411,6 +415,10 @@ func parseItemInfoBox(outer *box, br *bufReader) (Box, error) {
 	if br.ok() {
 		for _, box := range itemInfos {
 			pb, err := box.Parse()
+			if err == ErrUnknownBox {
+				// Skip unknown boxes gracefully in AVIF files
+				continue
+			}
 			if err != nil {
 				return nil, fmt.Errorf("error parsing ItemInfoEntry in ItemInfoBox: %v", err)
 			}
@@ -991,6 +999,28 @@ type ItemHevcConfigBox struct {
 	nalArray []*hevcNalArray
 }
 
+type av1Config struct {
+	marker                           uint8  // must be 1
+	version                          uint8  // must be 1
+	seqProfile                       uint8  // 3 bits
+	seqLevelIdx0                     uint8  // 5 bits
+	seqTier0                         uint8  // 1 bit
+	highBitdepth                     uint8  // 1 bit
+	twelveBit                        uint8  // 1 bit
+	monochrome                       uint8  // 1 bit
+	chromaSubsamplingX               uint8  // 1 bit
+	chromaSubsamplingY               uint8  // 1 bit
+	chromaSamplePosition             uint8  // 2 bits
+	initialPresentationDelayPresent  uint8  // 1 bit
+	initialPresentationDelayMinusOne uint8  // 4 bits (optional)
+	configOBUs                       []byte // remaining bytes
+}
+
+type ItemAv1ConfigBox struct {
+	*box
+	config av1Config
+}
+
 func (ib *ItemHevcConfigBox) AsHeader() []byte {
 	var out []byte
 	for _, na := range ib.nalArray {
@@ -1066,6 +1096,70 @@ func parseItemHevcConfigBox(gen *box, br *bufReader) (Box, error) {
 
 		ib.nalArray = append(ib.nalArray, na)
 	}
+
+	if !br.ok() {
+		return nil, br.err
+	}
+
+	return ib, nil
+}
+
+func parseItemAv1ConfigBox(gen *box, br *bufReader) (Box, error) {
+	ib := &ItemAv1ConfigBox{box: gen}
+
+	c := &ib.config
+
+	// Read first byte: marker (1 bit) + version (7 bits)
+	firstByte, err := br.readUint8()
+	if err != nil {
+		return nil, err
+	}
+	c.marker = (firstByte >> 7) & 1
+	c.version = firstByte & 0x7F
+
+	// Read second byte: seq_profile (3 bits) + seq_level_idx_0 (5 bits)
+	secondByte, err := br.readUint8()
+	if err != nil {
+		return nil, err
+	}
+	c.seqProfile = (secondByte >> 5) & 0x07
+	c.seqLevelIdx0 = secondByte & 0x1F
+
+	// Read third byte: seq_tier_0 (1 bit) + high_bitdepth (1 bit) + twelve_bit (1 bit) + monochrome (1 bit) +
+	//                   chroma_subsampling_x (1 bit) + chroma_subsampling_y (1 bit) + chroma_sample_position (2 bits)
+	thirdByte, err := br.readUint8()
+	if err != nil {
+		return nil, err
+	}
+	c.seqTier0 = (thirdByte >> 7) & 1
+	c.highBitdepth = (thirdByte >> 6) & 1
+	c.twelveBit = (thirdByte >> 5) & 1
+	c.monochrome = (thirdByte >> 4) & 1
+	c.chromaSubsamplingX = (thirdByte >> 3) & 1
+	c.chromaSubsamplingY = (thirdByte >> 2) & 1
+	c.chromaSamplePosition = thirdByte & 0x03
+
+	// Read fourth byte: reserved (3 bits) + initial_presentation_delay_present (1 bit) +
+	//                   initial_presentation_delay_minus_one (4 bits) if present
+	fourthByte, err := br.readUint8()
+	if err != nil {
+		return nil, err
+	}
+	c.initialPresentationDelayPresent = (fourthByte >> 4) & 1
+	if c.initialPresentationDelayPresent == 1 {
+		c.initialPresentationDelayMinusOne = fourthByte & 0x0F
+	}
+
+	// Read any remaining configOBUs
+	remaining := make([]byte, 0)
+	for {
+		b, err := br.readUint8()
+		if err != nil {
+			break // End of data
+		}
+		remaining = append(remaining, b)
+	}
+	c.configOBUs = remaining
 
 	if !br.ok() {
 		return nil, br.err

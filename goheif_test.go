@@ -28,6 +28,32 @@ func TestFormatRegistered(t *testing.T) {
 	}
 }
 
+func TestDecodeAVIF(t *testing.T) {
+	file, err := os.Open("heif/testdata/fox.avif")
+	if err != nil {
+		t.Skipf("Test AVIF file not found: %v", err)
+	}
+	defer file.Close()
+
+	// Decode using the main goheif package with AV1 support
+	img, err := Decode(file)
+	if err != nil {
+		t.Fatalf("Failed to decode AVIF image: %v", err)
+	}
+
+	// Check that we got a valid image
+	if img == nil {
+		t.Fatal("Decoded image is nil")
+	}
+
+	bounds := img.Bounds()
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		t.Fatalf("Invalid image dimensions: %dx%d", bounds.Dx(), bounds.Dy())
+	}
+
+	t.Logf("Successfully decoded AVIF image: %dx%d", bounds.Dx(), bounds.Dy())
+}
+
 func BenchmarkSafeEncoding(b *testing.B) {
 	benchEncoding(b, true)
 }
