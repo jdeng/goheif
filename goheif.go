@@ -15,7 +15,7 @@ import (
 
 // SafeEncoding uses more memory but seems to make
 // the library safer to use in containers.
-var SafeEncoding bool
+var SafeEncoding bool = true
 
 type gridBox struct {
 	columns, rows int
