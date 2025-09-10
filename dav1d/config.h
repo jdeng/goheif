@@ -49,7 +49,9 @@
 #else
 #define HAVE_CLOCK_GETTIME 1
 #define HAVE_POSIX_MEMALIGN 1
+#if !defined(__APPLE__)
 #define HAVE_MEMALIGN 1
+#endif
 #define HAVE_ALIGNED_ALLOC 1
 #endif
 
@@ -67,8 +69,10 @@
 #endif
 
 /* CPU features detection */
+#if defined(__linux__)
 #define HAVE_GETAUXVAL 1
 #define HAVE_ELF_AUX_INFO 0
+#endif
 
 /* Thread functions */
 #define HAVE_PTHREAD_GETAFFINITY_NP 1

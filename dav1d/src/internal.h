@@ -150,12 +150,12 @@ struct Dav1dContext {
             atomic_int progress[2]; /* [0]=started, [1]=completed */
             union {
                 struct {
-                    ALIGN(int8_t grain_lut_8bpc[3][GRAIN_HEIGHT + 1][GRAIN_WIDTH], 16);
-                    ALIGN(uint8_t scaling_8bpc[3][256], 64);
+                    DAV1D_ALIGN(int8_t grain_lut_8bpc[3][GRAIN_HEIGHT + 1][GRAIN_WIDTH], 16);
+                    DAV1D_ALIGN(uint8_t scaling_8bpc[3][256], 64);
                 };
                 struct {
-                    ALIGN(int16_t grain_lut_16bpc[3][GRAIN_HEIGHT + 1][GRAIN_WIDTH], 16);
-                    ALIGN(uint8_t scaling_16bpc[3][4096], 64);
+                    DAV1D_ALIGN(int16_t grain_lut_16bpc[3][GRAIN_HEIGHT + 1][GRAIN_WIDTH], 16);
+                    DAV1D_ALIGN(uint8_t scaling_16bpc[3][4096], 64);
                 };
             };
         } delayed_fg;
@@ -302,8 +302,8 @@ struct Dav1dFrameContext {
         int cdef_buf_sbh;
         int lr_buf_plane_sz[2]; /* (stride*sbh*4) << sb128 if n_tc > 1, else stride*4 */
         int re_sz /* h */;
-        ALIGN(Av1FilterLUT lim_lut, 16);
-        ALIGN(uint8_t lvl[8 /* seg_id */][4 /* dir */][8 /* ref */][2 /* is_gmv */], 16);
+        DAV1D_ALIGN(Av1FilterLUT lim_lut, 16);
+        DAV1D_ALIGN(uint8_t lvl[8 /* seg_id */][4 /* dir */][8 /* ref */][2 /* is_gmv */], 16);
         int last_sharpness;
         uint8_t *tx_lpf_right_edge[2];
         uint8_t *cdef_line_buf, *lr_line_buf;
@@ -380,7 +380,7 @@ struct Dav1dTileState {
         int8_t i8[4];
         uint32_t u32;
     } last_delta_lf;
-    ALIGN(uint8_t lflvlmem[8 /* seg_id */][4 /* dir */][8 /* ref */][2 /* is_gmv */], 16);
+    DAV1D_ALIGN(uint8_t lflvlmem[8 /* seg_id */][4 /* dir */][8 /* ref */][2 /* is_gmv */], 16);
     const uint8_t (*lflvl)[4][8][2];
 
     Av1RestorationUnit *lr_ref[3];
@@ -393,7 +393,7 @@ struct Dav1dTaskContext {
     int bx, by;
     BlockContext l, *a;
     refmvs_tile rt;
-    ALIGN(union, 64) {
+    DAV1D_ALIGN(union, 64) {
         int16_t cf_8bpc [32 * 32];
         int32_t cf_16bpc[32 * 32];
     };
@@ -402,7 +402,7 @@ struct Dav1dTaskContext {
         uint16_t al_pal_16bpc[2 /* a/l */][32 /* bx/y4 */][3 /* plane */][8 /* palette_idx */];
     };
     uint8_t pal_sz_uv[2 /* a/l */][32 /* bx4/by4 */];
-    ALIGN(union, 64) {
+    DAV1D_ALIGN(union, 64) {
         struct {
             union {
                 uint8_t  lap_8bpc [128 * 32];
@@ -436,12 +436,12 @@ struct Dav1dTaskContext {
                 struct {
                     uint8_t interintra_8bpc[64 * 64];
                     uint8_t edge_8bpc[257];
-                    ALIGN(uint8_t pal_8bpc[3 /* plane */][8 /* palette_idx */], 8);
+                    DAV1D_ALIGN(uint8_t pal_8bpc[3 /* plane */][8 /* palette_idx */], 8);
                 };
                 struct {
                     uint16_t interintra_16bpc[64 * 64];
                     uint16_t edge_16bpc[257];
-                    ALIGN(uint16_t pal_16bpc[3 /* plane */][8 /* palette_idx */], 16);
+                    DAV1D_ALIGN(uint16_t pal_16bpc[3 /* plane */][8 /* palette_idx */], 16);
                 };
             };
         };

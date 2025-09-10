@@ -49,7 +49,7 @@ CHECK_SIZE(refmvs_temporal_block, 5);
 PACKED(typedef union refmvs_refpair {
     int8_t ref[2]; // [0] = 0: intra=1, [1] = -1: comp=0
     uint16_t pair;
-}) ALIGN(refmvs_refpair, 2);
+}) DAV1D_ALIGN(refmvs_refpair, 2);
 CHECK_SIZE(refmvs_refpair, 2);
 
 typedef union refmvs_mvpair {
@@ -62,7 +62,7 @@ PACKED(typedef struct refmvs_block {
     refmvs_mvpair mv;
     refmvs_refpair ref;
     uint8_t bs, mf; // 1 = globalmv+affine, 2 = newmv
-}) ALIGN(refmvs_block, 4);
+}) DAV1D_ALIGN(refmvs_block, 4);
 CHECK_SIZE(refmvs_block, 12);
 
 typedef struct refmvs_frame {

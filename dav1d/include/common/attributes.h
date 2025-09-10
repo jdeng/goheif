@@ -79,10 +79,10 @@
  * ALIGN(uint8_t var[1][2][3][4], alignment).
  */
 #ifdef _MSC_VER
-#define ALIGN(ll, a) \
+#define DAV1D_ALIGN(ll, a) \
     __declspec(align(a)) ll
 #else
-#define ALIGN(line, align) \
+#define DAV1D_ALIGN(line, align) \
     line __attribute__((aligned(align)))
 #endif
 
@@ -93,11 +93,11 @@
  * ALIGN_STK_$align(uint8_t, var, 1, [2][3][4])
  */
 #define ALIGN_STK_64(type, var, sz1d, sznd) \
-    ALIGN(type var[sz1d]sznd, ALIGN_64_VAL)
+    DAV1D_ALIGN(type var[sz1d]sznd, ALIGN_64_VAL)
 #define ALIGN_STK_32(type, var, sz1d, sznd) \
-    ALIGN(type var[sz1d]sznd, ALIGN_32_VAL)
+    DAV1D_ALIGN(type var[sz1d]sznd, ALIGN_32_VAL)
 #define ALIGN_STK_16(type, var, sz1d, sznd) \
-    ALIGN(type var[sz1d]sznd, ALIGN_16_VAL)
+    DAV1D_ALIGN(type var[sz1d]sznd, ALIGN_16_VAL)
 
 /*
  * Forbid inlining of a function:

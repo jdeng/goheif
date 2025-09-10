@@ -518,7 +518,7 @@ static inline void splat_oneref_mv(const Dav1dContext *const c,
                                    const int bw4, const int bh4)
 {
     const enum InterPredMode mode = b->inter_mode;
-    const refmvs_block ALIGN(tmpl, 16) = (refmvs_block) {
+    const refmvs_block DAV1D_ALIGN(tmpl, 16) = (refmvs_block) {
         .ref.ref = { b->ref[0] + 1, b->interintra_type ? 0 : -1 },
         .mv.mv[0] = b->mv[0],
         .bs = bs,
@@ -533,7 +533,7 @@ static inline void splat_intrabc_mv(const Dav1dContext *const c,
                                     const Av1Block *const b,
                                     const int bw4, const int bh4)
 {
-    const refmvs_block ALIGN(tmpl, 16) = (refmvs_block) {
+    const refmvs_block DAV1D_ALIGN(tmpl, 16) = (refmvs_block) {
         .ref.ref = { 0, -1 },
         .mv.mv[0] = b->mv[0],
         .bs = bs,
@@ -550,7 +550,7 @@ static inline void splat_tworef_mv(const Dav1dContext *const c,
 {
     assert(bw4 >= 2 && bh4 >= 2);
     const enum CompInterPredMode mode = b->inter_mode;
-    const refmvs_block ALIGN(tmpl, 16) = (refmvs_block) {
+    const refmvs_block DAV1D_ALIGN(tmpl, 16) = (refmvs_block) {
         .ref.ref = { b->ref[0] + 1, b->ref[1] + 1 },
         .mv.mv = { b->mv[0], b->mv[1] },
         .bs = bs,
@@ -564,7 +564,7 @@ static inline void splat_intraref(const Dav1dContext *const c,
                                   const enum BlockSize bs,
                                   const int bw4, const int bh4)
 {
-    const refmvs_block ALIGN(tmpl, 16) = (refmvs_block) {
+    const refmvs_block DAV1D_ALIGN(tmpl, 16) = (refmvs_block) {
         .ref.ref = { 0, -1 },
         .mv.mv[0].n = INVALID_MV,
         .bs = bs,

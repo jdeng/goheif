@@ -69,9 +69,9 @@ typedef struct CdfDefaultContext {
     CdfModeContext m;
     struct {
         CdfMvComponent comp;
-        ALIGN(uint16_t joint[N_MV_JOINTS], 8);
+        DAV1D_ALIGN(uint16_t joint[N_MV_JOINTS], 8);
     } mv;
-    ALIGN(uint16_t kfym[5][5][N_INTRA_PRED_MODES + 3], 32);
+    DAV1D_ALIGN(uint16_t kfym[5][5][N_INTRA_PRED_MODES + 3], 32);
 } CdfDefaultContext;
 
 static const CdfDefaultContext default_cdf = {

@@ -28,7 +28,6 @@
 #include "config.h"
 
 #include <stdlib.h>
-
 #include "common/attributes.h"
 
 #include "src/intra_edge.h"
@@ -46,7 +45,7 @@ static struct {
     EdgeTip tip_sb128[256];
     EdgeBranch branch_sb64[1 + 4 + 16];
     EdgeTip tip_sb64[64];
-} ALIGN(nodes, 16);
+} DAV1D_ALIGN(nodes, 16);
 
 const EdgeNode *dav1d_intra_edge_tree[2] = {
     (EdgeNode*)nodes.branch_sb128, (EdgeNode*)nodes.branch_sb64

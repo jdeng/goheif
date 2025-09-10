@@ -6,7 +6,6 @@ package dav1d
 #cgo darwin CFLAGS: -fno-stack-check
 #cgo windows CFLAGS: -D_WIN32_WINNT=0x0601 -DUNICODE=1 -D_UNICODE=1 -D__USE_MINGW_ANSI_STDIO=1
 #cgo amd64 CFLAGS: -msse2 -mfpmath=sse
-#cgo arm64 CFLAGS: -fno-align-functions
 #cgo LDFLAGS: -lm
 #cgo !windows LDFLAGS: -lpthread
 
@@ -23,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"runtime"
 	"unsafe"
 )
 
@@ -43,6 +43,10 @@ func WithSafeEncoding(b bool) Option {
 func NewDecoder(opts ...Option) (*Decoder, error) {
 	var settings C.Dav1dSettings
 	C.dav1d_default_settings(&settings)
+
+	if runtime.GOOS == "darwin" {
+		settings.n_threads = 1
+	}
 
 	var ctx *C.Dav1dContext
 	if ret := C.dav1d_open(&ctx, &settings); ret < 0 {

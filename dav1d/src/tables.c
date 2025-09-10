@@ -412,7 +412,7 @@ const int8_t dav1d_cdef_directions[2 + 8 + 2 /* dir */][2 /* pass */] = {
     {  0 * 12 + 1, -1 * 12 + 2 }, // 1
 };
 
-const uint16_t ALIGN(dav1d_sgr_params[16][2], 4) = {
+const uint16_t DAV1D_ALIGN(dav1d_sgr_params[16][2], 4) = {
     { 140, 3236 }, { 112, 2158 }, {  93, 1618 }, {  80, 1438 },
     {  70, 1295 }, {  58, 1177 }, {  47, 1079 }, {  37,  996 },
     {  30,  925 }, {  25,  863 }, {   0, 2589 }, {   0, 1618 },
@@ -420,7 +420,7 @@ const uint16_t ALIGN(dav1d_sgr_params[16][2], 4) = {
 };
 
 ATTR_MCMODEL_SMALL
-const uint8_t ALIGN(dav1d_sgr_x_by_x[256], 64) = {
+const uint8_t DAV1D_ALIGN(dav1d_sgr_x_by_x[256], 64) = {
     255, 128,  85,  64,  51,  43,  37,  32,  28,  26,  23,  21,  20,  18,  17,
      16,  15,  14,  13,  13,  12,  12,  11,  11,  10,  10,   9,   9,   9,   9,
       8,   8,   8,   8,   7,   7,   7,   7,   7,   6,   6,   6,   6,   6,   6,
@@ -442,7 +442,7 @@ const uint8_t ALIGN(dav1d_sgr_x_by_x[256], 64) = {
 };
 
 ATTR_MCMODEL_SMALL
-const int8_t ALIGN(dav1d_mc_subpel_filters[6][15][8], 8) = {
+const int8_t DAV1D_ALIGN(dav1d_mc_subpel_filters[6][15][8], 8) = {
     [DAV1D_FILTER_8TAP_REGULAR] = {
         {   0,   1,  -3,  63,   4,  -1,   0,   0 },
         {   0,   1,  -5,  61,   9,  -2,   0,   0 },
@@ -547,7 +547,7 @@ const int8_t ALIGN(dav1d_mc_subpel_filters[6][15][8], 8) = {
 };
 
 ATTR_MCMODEL_SMALL
-const int8_t ALIGN(dav1d_mc_warp_filter[193][8], 8) = {
+const int8_t DAV1D_ALIGN(dav1d_mc_warp_filter[193][8], 8) = {
     // [-1, 0)
     { 0,   0, 127,   1,   0, 0, 0, 0 }, { 0,  -1, 127,   2,   0, 0, 0, 0 },
     { 1,  -3, 127,   4, - 1, 0, 0, 0 }, { 1,  -4, 126,   6,  -2, 1, 0, 0 },
@@ -652,7 +652,7 @@ const int8_t ALIGN(dav1d_mc_warp_filter[193][8], 8) = {
 };
 
 ATTR_MCMODEL_SMALL
-const int8_t ALIGN(dav1d_resize_filter[64][8], 8) = {
+const int8_t DAV1D_ALIGN(dav1d_resize_filter[64][8], 8) = {
     { 0,  0,  0, -128,    0,  0,  0, 0 }, { 0,  0,  1, -128,   -2,  1,  0, 0 },
     { 0, -1,  3, -127,   -4,  2, -1, 0 }, { 0, -1,  4, -127,   -6,  3, -1, 0 },
     { 0, -2,  6, -126,   -8,  3, -1, 0 }, { 0, -2,  7, -125,  -11,  4, -1, 0 },
@@ -687,7 +687,7 @@ const int8_t ALIGN(dav1d_resize_filter[64][8], 8) = {
     { 0, -1,  2,   -4, -127,  3, -1, 0 }, { 0,  0,  1,   -2, -128,  1,  0, 0 },
 };
 
-const uint8_t ALIGN(dav1d_sm_weights[128], 16) = {
+const uint8_t DAV1D_ALIGN(dav1d_sm_weights[128], 16) = {
     // Unused, because we always offset by bs, which is at least 2.
       0,   0,
     // bs = 2
@@ -762,7 +762,7 @@ const uint16_t dav1d_dr_intra_derivative[44] = {
     [1*idx+48] = f6
 #endif
 ATTR_MCMODEL_SMALL
-const int8_t ALIGN(dav1d_filter_intra_taps[5][64], 64) = {
+const int8_t DAV1D_ALIGN(dav1d_filter_intra_taps[5][64], 64) = {
     {
         F( 0,  -6, 10,  0,  0,  0, 12,  0 ),
         F( 1,  -5,  2, 10,  0,  0,  9,  0 ),
@@ -811,7 +811,7 @@ const int8_t ALIGN(dav1d_filter_intra_taps[5][64], 64) = {
     }
 };
 
-const uint8_t ALIGN(dav1d_obmc_masks[64], 16) = {
+const uint8_t DAV1D_ALIGN(dav1d_obmc_masks[64], 16) = {
     /* Unused */
      0,  0,
     /* 2 */
