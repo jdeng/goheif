@@ -75,10 +75,12 @@
 #endif
 
 /* Thread functions */
+#if !defined(_WIN32)
 #define HAVE_PTHREAD_GETAFFINITY_NP 1
 #define HAVE_PTHREAD_SETAFFINITY_NP 1
 #define HAVE_PTHREAD_SETNAME_NP 1
 #define HAVE_PTHREAD_SET_NAME_NP 0
+#endif
 
 /* C11 support */
 #define HAVE_C11_GENERIC 1
