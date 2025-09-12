@@ -920,7 +920,7 @@ public:
   virtual void work();
   virtual std::string name() const {
     char buf[100];
-    sprintf(buf,"deblock-%d",ctb_y);
+    snprintf(buf,sizeof(buf),"deblock-%d",ctb_y);
     return buf;
   }
 };
@@ -1051,7 +1051,7 @@ void apply_deblocking_filter(de265_image* img) // decoder_context* ctx)
       }
 #if 0
       char buf[1000];
-      sprintf(buf,"lf-after-V-%05d.yuv", ctx->img->PicOrderCntVal);
+      snprintf(buf,sizeof(buf),"lf-after-V-%05d.yuv", ctx->img->PicOrderCntVal);
       write_picture_to_file(ctx->img, buf);
 #endif
 
@@ -1066,7 +1066,7 @@ void apply_deblocking_filter(de265_image* img) // decoder_context* ctx)
       }
 
 #if 0
-      sprintf(buf,"lf-after-H-%05d.yuv", ctx->img->PicOrderCntVal);
+      snprintf(buf,sizeof(buf),"lf-after-H-%05d.yuv", ctx->img->PicOrderCntVal);
       write_picture_to_file(ctx->img, buf);
 #endif
     }
