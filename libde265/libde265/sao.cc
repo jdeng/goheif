@@ -410,7 +410,7 @@ public:
   virtual void work();
   virtual std::string name() const {
     char buf[100];
-    sprintf(buf,"sao-%d",ctb_y);
+    snprintf(buf, sizeof(buf), "sao-%d", ctb_y);
     return buf;
   }
 };

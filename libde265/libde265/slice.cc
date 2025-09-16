@@ -4909,14 +4909,14 @@ bool initialize_CABAC_at_slice_segment_start(thread_context* tctx)
 
 std::string thread_task_ctb_row::name() const {
   char buf[100];
-  sprintf(buf,"ctb-row-%d",debug_startCtbRow);
+  snprintf(buf, sizeof(buf), "ctb-row-%d", debug_startCtbRow);
   return buf;
 }
 
 
 std::string thread_task_slice_segment::name() const {
   char buf[100];
-  sprintf(buf,"slice-segment-%d;%d",debug_startCtbX,debug_startCtbY);
+  snprintf(buf, sizeof(buf), "slice-segment-%d;%d", debug_startCtbX, debug_startCtbY);
   return buf;
 }
 
