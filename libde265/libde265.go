@@ -11,6 +11,7 @@ package libde265
 import "C"
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"image"
@@ -21,6 +22,17 @@ type Decoder struct {
 	ctx        unsafe.Pointer
 	hasImage   bool
 	safeEncode bool
+}
+
+var nativeEndian binary.ByteOrder
+
+func init() {
+	var probe uint16 = 0x0102
+	if *(*byte)(unsafe.Pointer(&probe)) == 0x02 {
+		nativeEndian = binary.LittleEndian
+	} else {
+		nativeEndian = binary.BigEndian
+	}
 }
 
 func Init() {
@@ -123,6 +135,8 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 
 			width := C.de265_get_image_width(img, 0)
 			height := C.de265_get_image_height(img, 0)
+			yBits := int(C.de265_get_bits_per_pixel(img, 0))
+			cBits := int(C.de265_get_bits_per_pixel(img, 1))
 
 			var ystride, cstride C.int
 			y := C.de265_get_image_plane(img, 0, &ystride)
@@ -146,24 +160,31 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 				r = image.YCbCrSubsampleRatio444
 			}
 			ycc := &image.YCbCr{
-				YStride:        int(ystride),
-				CStride:        int(cstride),
 				SubsampleRatio: r,
 				Rect:           image.Rectangle{Min: image.Point{0, 0}, Max: image.Point{int(width), int(height)}},
 			}
-			if dec.safeEncode {
-				ycc.Y = C.GoBytes(unsafe.Pointer(y), C.int(height*ystride))
-				ycc.Cb = C.GoBytes(unsafe.Pointer(cb), C.int(cheight*cstride))
-				ycc.Cr = C.GoBytes(unsafe.Pointer(cr), C.int(cheight*cstride))
-			} else {
-				// Calculate the exact sizes needed
-				ySize := int(height) * int(ystride)
-				cSize := int(cheight) * int(cstride)
 
-				// Create slices directly from pointers with exact sizes
-				ycc.Y = unsafe.Slice((*byte)(y), ySize)
-				ycc.Cb = unsafe.Slice((*byte)(cb), cSize)
-				ycc.Cr = unsafe.Slice((*byte)(cr), cSize)
+			yPlane, yPlaneStride, err := decodePlane(y, int(height), int(ystride), yBits, dec.safeEncode)
+			if err != nil {
+				return nil, err
+			}
+			cbPlane, cPlaneStride, err := decodePlane(cb, int(cheight), int(cstride), cBits, dec.safeEncode)
+			if err != nil {
+				return nil, err
+			}
+			crPlane, crPlaneStride, err := decodePlane(cr, int(cheight), int(cstride), cBits, dec.safeEncode)
+			if err != nil {
+				return nil, err
+			}
+
+			ycc.YStride = yPlaneStride
+			ycc.CStride = cPlaneStride
+			ycc.Y = yPlane
+			ycc.Cb = cbPlane
+			ycc.Cr = crPlane
+
+			if cPlaneStride != crPlaneStride {
+				return nil, fmt.Errorf("chroma stride mismatch: cb=%d cr=%d", cPlaneStride, crPlaneStride)
 			}
 
 			//C.de265_release_next_picture(dec.ctx)
@@ -173,4 +194,60 @@ func (dec *Decoder) DecodeImage(data []byte) (image.Image, error) {
 	}
 
 	return nil, errors.New("no picture")
+}
+
+func decodePlane(ptr *C.uint8_t, height int, strideBytes int, bitsPerPixel int, safeEncode bool) ([]byte, int, error) {
+	if ptr == nil {
+		return nil, 0, errors.New("nil image plane")
+	}
+	if height < 0 || strideBytes <= 0 {
+		return nil, 0, fmt.Errorf("invalid plane dimensions: height=%d stride=%d", height, strideBytes)
+	}
+
+	size := height * strideBytes
+	var src []byte
+	if safeEncode {
+		src = C.GoBytes(unsafe.Pointer(ptr), C.int(size))
+	} else {
+		src = unsafe.Slice((*byte)(unsafe.Pointer(ptr)), size)
+	}
+
+	if bitsPerPixel <= 8 {
+		return src, strideBytes, nil
+	}
+
+	return unpackHighBitDepthPlane(src, height, strideBytes, bitsPerPixel)
+}
+
+func unpackHighBitDepthPlane(src []byte, height int, strideBytes int, bitsPerPixel int) ([]byte, int, error) {
+	bytesPerSample := (bitsPerPixel + 7) / 8
+	if bytesPerSample <= 1 {
+		return nil, 0, fmt.Errorf("invalid bytes per sample for %d-bit plane", bitsPerPixel)
+	}
+	if strideBytes%bytesPerSample != 0 {
+		return nil, 0, fmt.Errorf("stride %d is not aligned to %d-byte samples", strideBytes, bytesPerSample)
+	}
+
+	strideSamples := strideBytes / bytesPerSample
+	out := make([]byte, height*strideSamples)
+	shift := bitsPerPixel - 8
+
+	for row := 0; row < height; row++ {
+		srcRow := src[row*strideBytes : (row+1)*strideBytes]
+		dstRow := out[row*strideSamples : (row+1)*strideSamples]
+		for col := 0; col < strideSamples; col++ {
+			offset := col * bytesPerSample
+			var sample uint16
+			switch bytesPerSample {
+			case 2:
+				sample = nativeEndian.Uint16(srcRow[offset : offset+2])
+			default:
+				return nil, 0, fmt.Errorf("unsupported %d-byte samples", bytesPerSample)
+			}
+
+			dstRow[col] = byte(sample >> shift)
+		}
+	}
+
+	return out, strideSamples, nil
 }
