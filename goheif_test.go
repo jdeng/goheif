@@ -2,10 +2,13 @@ package goheif
 
 import (
 	"bytes"
+	"encoding/binary"
 	"image"
 	"io"
 	"os"
 	"testing"
+
+	"github.com/jdeng/goheif/heif"
 )
 
 func TestFormatRegistered(t *testing.T) {
@@ -56,6 +59,17 @@ func TestDecodeAVIF(t *testing.T) {
 	t.Logf("Successfully decoded AVIF image: %dx%d", bounds.Dx(), bounds.Dy())
 }
 
+func TestDecodeHEVCAnnexB(t *testing.T) {
+	stream, width, height := testHEVCAnnexBStream(t, "testdata/camel.heic")
+	img, err := DecodeHEVCAnnexB(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := img.Bounds(); got.Dx() != width || got.Dy() != height {
+		t.Fatalf("decoded image size = %dx%d, want %dx%d", got.Dx(), got.Dy(), width, height)
+	}
+}
+
 func BenchmarkSafeEncoding(b *testing.B) {
 	benchEncoding(b, true)
 }
@@ -85,4 +99,68 @@ func benchEncoding(b *testing.B, safe bool) {
 		Decode(r)
 		r.Seek(0, io.SeekStart)
 	}
+}
+
+func testHEVCAnnexBStream(t *testing.T, path string) ([]byte, int, int) {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hf := heif.Open(bytes.NewReader(data))
+	item, err := hf.PrimaryItem()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Info != nil && item.Info.ItemType == "grid" {
+		dimg := item.Reference("dimg")
+		if dimg == nil || len(dimg.ToItemIDs) == 0 {
+			t.Fatal("grid item has no dimg references")
+		}
+		item, err = hf.ItemByID(dimg.ToItemIDs[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if item.Info == nil || item.Info.ItemType != "hvc1" {
+		t.Fatalf("test item type = %v, want hvc1", item.Info)
+	}
+	width, height, ok := item.SpatialExtents()
+	if !ok {
+		t.Fatal("test item has no spatial extents")
+	}
+	config, ok := item.HevcConfig()
+	if !ok {
+		t.Fatal("test item has no hvcC")
+	}
+	itemData, err := hf.GetItemData(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sample bytes.Buffer
+	sample.Write(config.AsHeader())
+	sample.Write(itemData)
+	return lengthPrefixedNALSampleToAnnexB(t, sample.Bytes()), width, height
+}
+
+func lengthPrefixedNALSampleToAnnexB(t *testing.T, sample []byte) []byte {
+	t.Helper()
+
+	var out bytes.Buffer
+	for len(sample) > 0 {
+		if len(sample) < 4 {
+			t.Fatalf("truncated nal length: %d bytes left", len(sample))
+		}
+		size := int(binary.BigEndian.Uint32(sample[:4]))
+		sample = sample[4:]
+		if size <= 0 || size > len(sample) {
+			t.Fatalf("invalid nal size %d with %d bytes left", size, len(sample))
+		}
+		out.Write([]byte{0, 0, 0, 1})
+		out.Write(sample[:size])
+		sample = sample[size:]
+	}
+	return out.Bytes()
 }
