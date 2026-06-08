@@ -30,8 +30,11 @@ ImageSource::ImageSource()
 }
 
 
+ImageSource::~ImageSource() { }
+
+
 ImageSource_YUV::ImageSource_YUV()
-  : mFH(NULL)
+  : mFH(nullptr)
 {
 }
 
@@ -46,10 +49,10 @@ ImageSource_YUV::~ImageSource_YUV()
 
 bool ImageSource_YUV::set_input_file(const char* filename, int w,int h)
 {
-  assert(mFH==NULL);
+  assert(mFH==nullptr);
 
   mFH = fopen(filename,"rb");
-  if (mFH==NULL) {
+  if (mFH==nullptr) {
     return false;
   }
 
@@ -63,34 +66,34 @@ bool ImageSource_YUV::set_input_file(const char* filename, int w,int h)
 
 de265_image* ImageSource_YUV::read_next_image()
 {
-  if (mReachedEndOfFile) return NULL;
+  if (mReachedEndOfFile) return nullptr;
 
   de265_image* img = new de265_image;
-  img->alloc_image(width,height,de265_chroma_420, NULL, false,
-                   NULL, /*NULL,*/ 0, NULL, false);
+  img->alloc_image(width,height,de265_chroma_420, nullptr, false,
+                   nullptr, /*nullptr,*/ 0, nullptr, false);
   assert(img); // TODO: error handling
 
   // --- load image ---
 
   uint8_t* p;
-  int stride;
+  ptrdiff_t stride;
 
   p = img->get_image_plane(0);  stride = img->get_image_stride(0);
-  for (int y=0;y<height;y++) {
+  for (uint32_t y=0;y<height;y++) {
     if (fread(p+y*stride,1,width,mFH) != width) {
       goto check_eof;
     }
   }
 
   p = img->get_image_plane(1);  stride = img->get_image_stride(1);
-  for (int y=0;y<height/2;y++) {
+  for (uint32_t y=0;y<height/2;y++) {
     if (fread(p+y*stride,1,width/2,mFH) != width/2) {
       goto check_eof;
     }
   }
 
   p = img->get_image_plane(2);  stride = img->get_image_stride(2);
-  for (int y=0;y<height/2;y++) {
+  for (uint32_t y=0;y<height/2;y++) {
     if (fread(p+y*stride,1,width/2,mFH) != width/2) {
       goto check_eof;
     }
@@ -102,7 +105,7 @@ check_eof:
   if (feof(mFH)) {
     mReachedEndOfFile = true;
     delete img;
-    return NULL;
+    return nullptr;
   }
   else {
     return img;
@@ -131,6 +134,23 @@ void ImageSource_YUV::skip_frames(int n)
 }
 
 
+int ImageSource_YUV::get_width() const
+{
+  return width;
+}
+
+
+int ImageSource_YUV::get_height() const
+{
+  return height;
+}
+
+
+
+
+ImageSink::~ImageSink() { }
+
+ImageSink_YUV::ImageSink_YUV() : mFH(nullptr) { }
 
 
 ImageSink_YUV::~ImageSink_YUV()
@@ -142,7 +162,7 @@ ImageSink_YUV::~ImageSink_YUV()
 
 bool ImageSink_YUV::set_filename(const char* filename)
 {
-  assert(mFH==NULL);
+  assert(mFH==nullptr);
 
   mFH = fopen(filename,"wb");
 
@@ -154,7 +174,7 @@ void ImageSink_YUV::send_image(const de265_image* img)
   // --- write image ---
 
   const uint8_t* p;
-  int stride;
+  ptrdiff_t stride;
 
   int width = img->get_width();
   int height= img->get_height();
@@ -180,8 +200,10 @@ void ImageSink_YUV::send_image(const de265_image* img)
 
 
 
+PacketSink::~PacketSink() { }
+
 PacketSink_File::PacketSink_File()
-  : mFH(NULL)
+  : mFH(nullptr)
 {
 }
 
@@ -196,7 +218,7 @@ LIBDE265_API PacketSink_File::~PacketSink_File()
 
 LIBDE265_API void PacketSink_File::set_filename(const char* filename)
 {
-  assert(mFH==NULL);
+  assert(mFH==nullptr);
 
   mFH = fopen(filename,"wb");
 }

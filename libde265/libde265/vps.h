@@ -54,23 +54,23 @@ public:
 
   // --- profile ---
 
-  char profile_present_flag;  // always true for general profile
+  bool profile_present_flag;  // always true for general profile
 
   char profile_space;  // currently always 0
-  char tier_flag;      // main tier or low tier (see Table A-66/A-67)
+  bool tier_flag;      // main tier or low tier (see Table A-66/A-67)
   enum profile_idc profile_idc; // profile
 
-  char profile_compatibility_flag[32]; // to which profile we are compatible
+  bool profile_compatibility_flag[32]; // to which profile we are compatible
 
-  char progressive_source_flag;
-  char interlaced_source_flag;
-  char non_packed_constraint_flag;
-  char frame_only_constraint_flag;
+  bool progressive_source_flag;
+  bool interlaced_source_flag;
+  bool non_packed_constraint_flag;
+  bool frame_only_constraint_flag;
 
 
   // --- level ---
 
-  char level_present_flag; // always true for general level
+  bool level_present_flag; // always true for general level
   int  level_idc;          // level * 30
 };
 
@@ -116,9 +116,9 @@ void dump_bit_rate_pic_rate_info(struct bit_rate_pic_rate_info* hdr,
 
 
 typedef struct {
-  int vps_max_dec_pic_buffering; // [1 ; ]
-  int vps_max_num_reorder_pics;  // [0 ; ]
-  int vps_max_latency_increase;  // 0 -> no limit, otherwise value is (x-1)
+  uint8_t vps_max_dec_pic_buffering;  // [1 ; max_dpb_size]
+  uint8_t vps_max_num_reorder_pics;   // [0 ; vps_max_dec_pic_buffering]
+  uint32_t vps_max_latency_increase;  // 0 -> no limit, otherwise value is (x-1)
 } layer_data;
 
 
@@ -131,30 +131,30 @@ public:
 
   void set_defaults(enum profile_idc profile, int level_major, int level_minor);
 
-  int video_parameter_set_id;
-  int vps_max_layers;            // [1;?]  currently always 1
-  int vps_max_sub_layers;        // [1;7]  number of temporal sub-layers
-  int vps_temporal_id_nesting_flag; // indicate temporal up-switching always possible
+  uint8_t video_parameter_set_id;    // [0;15]
+  uint8_t vps_max_layers;            // [1;?]  currently always 1
+  uint8_t vps_max_sub_layers;        // [1;7]  number of temporal sub-layers
+  bool vps_temporal_id_nesting_flag; // indicate temporal up-switching always possible
   profile_tier_level profile_tier_level_;
 
-  int vps_sub_layer_ordering_info_present_flag;
+  bool vps_sub_layer_ordering_info_present_flag;
   layer_data layer[MAX_TEMPORAL_SUBLAYERS];
 
   uint8_t vps_max_layer_id;   // max value for nuh_layer_id in NALs
-  int     vps_num_layer_sets; // [1;1024], currently always 1
+  uint16_t vps_num_layer_sets; // [1;1024], currently always 1
 
   std::vector<std::vector<char> > layer_id_included_flag; // max size = [1024][64]
 
 
   // --- timing info ---
 
-  char     vps_timing_info_present_flag;
+  bool     vps_timing_info_present_flag;
   uint32_t vps_num_units_in_tick;
   uint32_t vps_time_scale;
-  char     vps_poc_proportional_to_timing_flag;
+  bool     vps_poc_proportional_to_timing_flag;
   uint32_t vps_num_ticks_poc_diff_one;
 
-  int vps_num_hrd_parameters;     // currently [0;1]
+  uint16_t vps_num_hrd_parameters;  // [0;vps_num_layer_sets]
 
   std::vector<uint16_t> hrd_layer_set_idx;  // max size = 1024
   std::vector<char>     cprms_present_flag; // max size = 1024
@@ -162,7 +162,7 @@ public:
 
   // --- vps extension ---
 
-  char vps_extension_flag;
+  bool vps_extension_flag;
 };
 
 

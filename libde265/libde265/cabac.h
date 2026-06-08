@@ -25,28 +25,31 @@
 #include "contextmodel.h"
 
 
-typedef struct {
-  uint8_t* bitstream_start;
-  uint8_t* bitstream_curr;
-  uint8_t* bitstream_end;
+class CABAC_decoder {
+public:
+  void init(uint8_t* bitstream, int length);
+  void init_CABAC();
+  int  decode_bit(context_model* model);
+  int  decode_TU(int cMax, context_model* model);
+  int  decode_term_bit();
 
-  uint32_t range;
-  uint32_t value;
-  int16_t  bits_needed;
-} CABAC_decoder;
+  int  decode_bypass();
+  int  decode_TU_bypass(int cMax);
+  uint32_t  decode_FL_bypass(int nBits);
+  int  decode_TR_bypass(int cRiceParam, int cTRMax);
+  uint32_t  decode_EGk_bypass(int k);
 
+  uint8_t* bitstream_start = nullptr;
+  uint8_t* bitstream_curr = nullptr;
+  uint8_t* bitstream_end = nullptr;
 
-void init_CABAC_decoder(CABAC_decoder* decoder, uint8_t* bitstream, int length);
-void init_CABAC_decoder_2(CABAC_decoder* decoder);
-int  decode_CABAC_bit(CABAC_decoder* decoder, context_model* model);
-int  decode_CABAC_TU(CABAC_decoder* decoder, int cMax, context_model* model);
-int  decode_CABAC_term_bit(CABAC_decoder* decoder);
+private:
+  uint32_t range = 0;
+  uint32_t value = 0;
+  int16_t  bits_needed = 0;
 
-int  decode_CABAC_bypass(CABAC_decoder* decoder);
-int  decode_CABAC_TU_bypass(CABAC_decoder* decoder, int cMax);
-uint32_t  decode_CABAC_FL_bypass(CABAC_decoder* decoder, int nBits);
-int  decode_CABAC_TR_bypass(CABAC_decoder* decoder, int cRiceParam, int cTRMax);
-int  decode_CABAC_EGk_bypass(CABAC_decoder* decoder, int k);
+  int  decode_FL_bypass_parallel(int nBits);
+};
 
 
 // ---------------------------------------------------------------------------
@@ -54,7 +57,7 @@ int  decode_CABAC_EGk_bypass(CABAC_decoder* decoder, int k);
 class CABAC_encoder
 {
 public:
- CABAC_encoder() : mCtxModels(NULL) { }
+ CABAC_encoder() : mCtxModels(nullptr) { }
   virtual ~CABAC_encoder() { }
 
   virtual int size() const = 0;
@@ -105,45 +108,45 @@ public:
   CABAC_encoder_bitstream();
   ~CABAC_encoder_bitstream();
 
-  virtual void reset();
+  void reset() override;
 
-  virtual int size() const { return data_size; }
+  int size() const override { return data_size; }
   uint8_t* data() const { return data_mem; }
 
   // --- VLC ---
 
-  virtual void write_bits(uint32_t bits,int n);
-  virtual bool write_startcode();
-  virtual void skip_bits(int nBits);
+  void write_bits(uint32_t bits,int n) override;
+  bool write_startcode() override;
+  void skip_bits(int nBits) override;
 
-  virtual int  number_free_bits_in_byte() const;
+  int  number_free_bits_in_byte() const override;
 
   // output all remaining bits and fill with zeros to next byte boundary
-  virtual void flush_VLC();
+  void flush_VLC() override;
 
 
   // --- CABAC ---
 
-  virtual void init_CABAC();
-  virtual void write_CABAC_bit(int modelIdx, int bit);
-  virtual void write_CABAC_bypass(int bit);
-  virtual void write_CABAC_term_bit(int bit);
-  virtual void flush_CABAC();
+  void init_CABAC() override;
+  void write_CABAC_bit(int modelIdx, int bit) override;
+  void write_CABAC_bypass(int bit) override;
+  void write_CABAC_term_bit(int bit) override;
+  void flush_CABAC() override;
 
-  virtual bool modifies_context() const { return true; }
+  bool modifies_context() const override { return true; }
 
 private:
   // data buffer
 
-  uint8_t* data_mem;
-  uint32_t data_capacity;
-  uint32_t data_size;
-  char     state; // for inserting emulation-prevention bytes
+  uint8_t* data_mem = nullptr;
+  uint32_t data_capacity = 0;
+  uint32_t data_size = 0;
+  char     state = 0; // for inserting emulation-prevention bytes
 
   // VLC
 
   uint32_t vlc_buffer;
-  uint32_t vlc_buffer_len;
+  uint32_t vlc_buffer_len = 0;
 
 
   // CABAC
@@ -167,33 +170,33 @@ class CABAC_encoder_estim : public CABAC_encoder
 public:
   CABAC_encoder_estim() : mFracBits(0) { }
 
-  virtual void reset() { mFracBits=0; }
+  void reset() override { mFracBits=0; }
 
-  virtual int size() const { return mFracBits>>(15+3); }
+  int size() const override { return mFracBits>>(15+3); }
 
   uint64_t getFracBits() const { return mFracBits; }
   float    getRDBits() const { return mFracBits / float(1<<15); }
 
   // --- VLC ---
 
-  virtual void write_bits(uint32_t bits,int n) { mFracBits += n<<15; }
-  virtual void write_bit(int bit) { mFracBits+=1<<15; }
-  virtual bool write_startcode() { mFracBits += (1<<15)*8*3; return true; }
-  virtual void skip_bits(int nBits) { mFracBits += nBits<<15; }
-  virtual int  number_free_bits_in_byte() const { return 0; } // TODO, good enough for now
+  void write_bits(uint32_t bits,int n) override { mFracBits += n<<15; }
+  void write_bit(int bit) override { mFracBits+=1<<15; }
+  bool write_startcode() override { mFracBits += (1<<15)*8*3; return true; }
+  void skip_bits(int nBits) override { mFracBits += nBits<<15; }
+  int  number_free_bits_in_byte() const override { return 0; } // TODO, good enough for now
 
   // --- CABAC ---
 
-  virtual void write_CABAC_bit(int modelIdx, int bit);
-  virtual void write_CABAC_bypass(int bit) {
+  void write_CABAC_bit(int modelIdx, int bit) override;
+  void write_CABAC_bypass(int bit) override {
     mFracBits += 0x8000;
   }
-  virtual void write_CABAC_FL_bypass(int value, int nBits) {
+  void write_CABAC_FL_bypass(int value, int nBits) override {
     mFracBits += nBits<<15;
   }
-  virtual void write_CABAC_term_bit(int bit) { /* not implemented (not needed) */ }
+  void write_CABAC_term_bit(int bit) override { /* not implemented (not needed) */ }
 
-  virtual bool modifies_context() const { return true; }
+  bool modifies_context() const override { return true; }
 
  protected:
   uint64_t mFracBits;
@@ -203,9 +206,9 @@ public:
 class CABAC_encoder_estim_constant : public CABAC_encoder_estim
 {
  public:
-  void write_CABAC_bit(int modelIdx, int bit);
+  void write_CABAC_bit(int modelIdx, int bit) override;
 
-  virtual bool modifies_context() const { return false; }
+  bool modifies_context() const override { return false; }
 };
 
 #endif

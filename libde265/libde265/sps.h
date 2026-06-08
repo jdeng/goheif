@@ -33,11 +33,18 @@
 class error_queue;
 
 // #define MAX_REF_PIC_SETS 64  // maximum according to standard
-#define MAX_NUM_LT_REF_PICS_SPS 32
+constexpr int MAX_NUM_LT_REF_PICS_SPS = 32;
 
 // This is just a safety range. It is chosen such that width/height fits into 16bit integers and the total number of pixels in 32bit integers.
-#define MAX_PICTURE_WIDTH  65535
-#define MAX_PICTURE_HEIGHT 65535
+constexpr int MAX_PICTURE_WIDTH  = 65535;
+constexpr int MAX_PICTURE_HEIGHT = 65535;
+
+// pic_width/height_in_luma_samples are stored as uint16_t and PicSizeInSamplesY as uint32_t,
+// so these limits must keep width/height in 16 bits and their product in 32 bits.
+static_assert(MAX_PICTURE_WIDTH  <= 0xFFFF, "picture width must fit in uint16_t");
+static_assert(MAX_PICTURE_HEIGHT <= 0xFFFF, "picture height must fit in uint16_t");
+static_assert((uint64_t)MAX_PICTURE_WIDTH * MAX_PICTURE_HEIGHT <= 0xFFFFFFFFu,
+              "total luma sample count must fit in uint32_t");
 
 enum {
   CHROMA_MONO = 0,
@@ -48,14 +55,14 @@ enum {
 };
 
 
-typedef struct scaling_list_data {
+struct scaling_list_data {
   // structure size: approx. 4 kB
 
   uint8_t ScalingFactor_Size0[6][4][4];
   uint8_t ScalingFactor_Size1[6][8][8];
   uint8_t ScalingFactor_Size2[6][16][16];
   uint8_t ScalingFactor_Size3[6][32][32];
-} scaling_list_data;
+};
 
 
 enum PresetSet {
@@ -68,15 +75,15 @@ class sps_range_extension
  public:
   sps_range_extension();
 
-  uint8_t transform_skip_rotation_enabled_flag;
-  uint8_t transform_skip_context_enabled_flag;
-  uint8_t implicit_rdpcm_enabled_flag;
-  uint8_t explicit_rdpcm_enabled_flag;
-  uint8_t extended_precision_processing_flag;
-  uint8_t intra_smoothing_disabled_flag;
-  uint8_t high_precision_offsets_enabled_flag;
-  uint8_t persistent_rice_adaptation_enabled_flag;
-  uint8_t cabac_bypass_alignment_enabled_flag;
+  uint8_t transform_skip_rotation_enabled_flag = 0;
+  uint8_t transform_skip_context_enabled_flag = 0;
+  uint8_t implicit_rdpcm_enabled_flag = 0;
+  uint8_t explicit_rdpcm_enabled_flag = 0;
+  uint8_t extended_precision_processing_flag = 0;
+  uint8_t intra_smoothing_disabled_flag = 0;
+  uint8_t high_precision_offsets_enabled_flag = 0;
+  uint8_t persistent_rice_adaptation_enabled_flag = 0;
+  uint8_t cabac_bypass_alignment_enabled_flag = 0;
 
   de265_error read(error_queue*, bitreader*);
   void dump(int fd) const;
@@ -98,81 +105,82 @@ public:
   void set_TB_log2size_range(int mini,int maxi);
   void set_resolution(int w,int h);
 
-  bool sps_read; // whether the sps has been read from the bitstream
+  bool sps_read = false; // whether the sps has been read from the bitstream
 
 
-  char video_parameter_set_id;
-  char sps_max_sub_layers;            // [1;7]
-  char sps_temporal_id_nesting_flag;
+  uint8_t video_parameter_set_id;
+  uint8_t sps_max_sub_layers;            // [1;7]
+  bool sps_temporal_id_nesting_flag;
 
   profile_tier_level profile_tier_level_;
 
-  int seq_parameter_set_id;
-  int chroma_format_idc;
+  uint8_t seq_parameter_set_id;       // [0;15]
+  uint8_t chroma_format_idc;          // [0;3]
 
-  char separate_colour_plane_flag;
-  int  pic_width_in_luma_samples;
-  int  pic_height_in_luma_samples;
-  char conformance_window_flag;
+  bool separate_colour_plane_flag;
+  uint16_t pic_width_in_luma_samples;   // <= MAX_PICTURE_WIDTH  (validated on parse)
+  uint16_t pic_height_in_luma_samples;  // <= MAX_PICTURE_HEIGHT (validated on parse)
+  bool conformance_window_flag;
 
   int conf_win_left_offset;
   int conf_win_right_offset;
   int conf_win_top_offset;
   int conf_win_bottom_offset;
 
-  int bit_depth_luma;
-  int bit_depth_chroma;
+  uint8_t bit_depth_luma;              // [8;16]
+  uint8_t bit_depth_chroma;            // [8;16]
 
-  int  log2_max_pic_order_cnt_lsb;
-  char sps_sub_layer_ordering_info_present_flag;
+  uint8_t log2_max_pic_order_cnt_lsb; // [4;16]
+  bool sps_sub_layer_ordering_info_present_flag;
 
-  int sps_max_dec_pic_buffering[7]; // for each temporal layer
-  int sps_max_num_reorder_pics[7];
-  int sps_max_latency_increase_plus1[7];
+  uint8_t sps_max_dec_pic_buffering[7]; // for each temporal layer
+  uint8_t sps_max_num_reorder_pics[7];
+  uint32_t sps_max_latency_increase_plus1[7];
+  bool     sps_max_latency_increase_present[7] = {};
 
-  int  log2_min_luma_coding_block_size;             // smallest CB size [3;6]
-  int  log2_diff_max_min_luma_coding_block_size;    // largest  CB size
-  int  log2_min_transform_block_size;               // smallest TB size [2;5]
-  int  log2_diff_max_min_transform_block_size;      // largest  TB size
-  int  max_transform_hierarchy_depth_inter;
-  int  max_transform_hierarchy_depth_intra;
+  uint8_t log2_min_luma_coding_block_size;             // smallest CB size [3;6]
+  uint8_t log2_diff_max_min_luma_coding_block_size;    // largest  CB size
+  uint8_t log2_min_transform_block_size;               // smallest TB size [2;5]
+  uint8_t log2_diff_max_min_transform_block_size;      // largest  TB size
+  uint8_t max_transform_hierarchy_depth_inter;
+  uint8_t max_transform_hierarchy_depth_intra;
 
-  char scaling_list_enable_flag;
-  char sps_scaling_list_data_present_flag; /* if not set, the default scaling lists will be set
+  bool scaling_list_enable_flag;
+  bool sps_scaling_list_data_present_flag; /* if not set, the default scaling lists will be set
                                               in scaling_list */
 
   struct scaling_list_data scaling_list;
 
-  char amp_enabled_flag;
-  char sample_adaptive_offset_enabled_flag;
-  char pcm_enabled_flag;
+  bool amp_enabled_flag;
+  bool sample_adaptive_offset_enabled_flag;
+  bool pcm_enabled_flag;
 
-  char pcm_sample_bit_depth_luma;
-  char pcm_sample_bit_depth_chroma;
+  uint8_t pcm_sample_bit_depth_luma;
+  uint8_t pcm_sample_bit_depth_chroma;
   int  log2_min_pcm_luma_coding_block_size;
   int  log2_diff_max_min_pcm_luma_coding_block_size;
-  char pcm_loop_filter_disable_flag;
+  bool pcm_loop_filter_disable_flag;
 
   int num_short_term_ref_pic_sets() const { return ref_pic_sets.size(); }
   std::vector<ref_pic_set> ref_pic_sets; // [0 ; num_short_term_ref_pic_set (<=MAX_REF_PIC_SETS) )
 
-  char long_term_ref_pics_present_flag;
+  bool long_term_ref_pics_present_flag;
 
-  int num_long_term_ref_pics_sps;
+  uint8_t num_long_term_ref_pics_sps; // [0;32]
 
   int  lt_ref_pic_poc_lsb_sps[MAX_NUM_LT_REF_PICS_SPS];
-  char used_by_curr_pic_lt_sps_flag[MAX_NUM_LT_REF_PICS_SPS];
+  bool used_by_curr_pic_lt_sps_flag[MAX_NUM_LT_REF_PICS_SPS];
 
-  char sps_temporal_mvp_enabled_flag;
-  char strong_intra_smoothing_enable_flag;
+  bool sps_temporal_mvp_enabled_flag;
+  bool strong_intra_smoothing_enable_flag;
 
-  char vui_parameters_present_flag;
+  bool vui_parameters_present_flag;
   video_usability_information vui;
 
-  char sps_extension_present_flag;
-  char sps_range_extension_flag;
-  char sps_multilayer_extension_flag;
-  char sps_extension_6bits;
+  bool sps_extension_present_flag;
+  bool sps_range_extension_flag;
+  bool sps_multilayer_extension_flag;
+  uint8_t sps_extension_6bits;
 
   sps_range_extension range_extension;
 
@@ -200,16 +208,16 @@ public:
 
   int MaxPicOrderCntLsb;
 
-  int Log2MinCbSizeY;
-  int Log2CtbSizeY;
-  int MinCbSizeY;
-  int CtbSizeY;
-  int PicWidthInMinCbsY;
-  int PicWidthInCtbsY;
-  int PicHeightInMinCbsY;
-  int PicHeightInCtbsY;
-  int PicSizeInMinCbsY;
-  int PicSizeInCtbsY;
+  uint8_t Log2MinCbSizeY;
+  uint8_t Log2CtbSizeY;
+  uint8_t MinCbSizeY;
+  uint8_t CtbSizeY;
+  uint16_t PicWidthInMinCbsY;
+  uint16_t PicWidthInCtbsY;
+  uint16_t PicHeightInMinCbsY;
+  uint16_t PicHeightInCtbsY;
+  uint32_t PicSizeInMinCbsY;
+  uint32_t PicSizeInCtbsY;
   uint32_t PicSizeInSamplesY;
 
   int CtbWidthC, CtbHeightC;
@@ -228,12 +236,12 @@ public:
   int Log2MinIpcmCbSizeY;
   int Log2MaxIpcmCbSizeY;
 
-  int SpsMaxLatencyPictures[7]; // [temporal layer]
+  int SpsMaxLatencyPictures[7] = {}; // [temporal layer]
 
   uint8_t WpOffsetBdShiftY;
   uint8_t WpOffsetBdShiftC;
-  int32_t WpOffsetHalfRangeY;
-  int32_t WpOffsetHalfRangeC;
+  uint16_t WpOffsetHalfRangeY;
+  uint16_t WpOffsetHalfRangeC;
 
 
   int getPUIndexRS(int pixelX,int pixelY) const {

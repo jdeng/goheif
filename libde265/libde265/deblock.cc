@@ -22,6 +22,8 @@
 #include "util.h"
 #include "transform.h"
 #include "de265.h"
+#include "decctx.h"
+#include "fallback-deblk.h"
 
 #include <assert.h>
 
@@ -127,7 +129,7 @@ void markPredictionBlockBoundary(de265_image* img, int x0,int y0,
 }
 
 
-bool derive_edgeFlags_CTBRow(de265_image* img, int ctby)
+bool derive_edgeFlags_CTBRow(de265_image* img, uint16_t ctby)
 {
   const seq_parameter_set& sps = img->get_sps();
   const pic_parameter_set& pps = img->get_pps();
@@ -140,8 +142,8 @@ bool derive_edgeFlags_CTBRow(de265_image* img, int ctby)
   int ctbshift = sps.Log2CtbSizeY;
 
 
-  int cb_y_start = ( ctby    << sps.Log2CtbSizeY) >> sps.Log2MinCbSizeY;
-  int cb_y_end   = ((ctby+1) << sps.Log2CtbSizeY) >> sps.Log2MinCbSizeY;
+  uint16_t cb_y_start = ( ctby    << sps.Log2CtbSizeY) >> sps.Log2MinCbSizeY;
+  uint16_t cb_y_end   = ((ctby+1) << sps.Log2CtbSizeY) >> sps.Log2MinCbSizeY;
 
   cb_y_end = std::min(cb_y_end, sps.PicHeightInMinCbsY);
 
@@ -187,8 +189,8 @@ bool derive_edgeFlags_CTBRow(de265_image* img, int ctby)
               filterLeftCbEdge = 0;
             }
           else if (pps.loop_filter_across_tiles_enabled_flag == 0 &&
-                   pps.TileIdRS[  x0ctb           +y0ctb*picWidthInCtbs] !=
-                   pps.TileIdRS[((x0-1)>>ctbshift)+y0ctb*picWidthInCtbs]) {
+                   pps.scan->TileIdRS[  x0ctb           +y0ctb*picWidthInCtbs] !=
+                   pps.scan->TileIdRS[((x0-1)>>ctbshift)+y0ctb*picWidthInCtbs]) {
             filterLeftCbEdge = 0;
           }
         }
@@ -201,8 +203,8 @@ bool derive_edgeFlags_CTBRow(de265_image* img, int ctby)
               filterTopCbEdge = 0;
             }
           else if (pps.loop_filter_across_tiles_enabled_flag == 0 &&
-                   pps.TileIdRS[x0ctb+  y0ctb           *picWidthInCtbs] !=
-                   pps.TileIdRS[x0ctb+((y0-1)>>ctbshift)*picWidthInCtbs]) {
+                   pps.scan->TileIdRS[x0ctb+  y0ctb           *picWidthInCtbs] !=
+                   pps.scan->TileIdRS[x0ctb+((y0-1)>>ctbshift)*picWidthInCtbs]) {
             filterTopCbEdge = 0;
           }
         }
@@ -250,11 +252,11 @@ void derive_boundaryStrength(de265_image* img, bool vertical, int yStart,int yEn
     (DEBLOCK_FLAG_HORIZ | DEBLOCK_PB_EDGE_HORIZ);
   int transformEdgeMask = vertical ? DEBLOCK_FLAG_VERTI : DEBLOCK_FLAG_HORIZ;
 
-  xEnd = libde265_min(xEnd,img->get_deblk_width());
-  yEnd = libde265_min(yEnd,img->get_deblk_height());
+  xEnd = std::min(xEnd,img->get_deblk_width());
+  yEnd = std::min(yEnd,img->get_deblk_height());
 
-  int TUShift = img->get_sps().Log2MinTrafoSize;
-  int TUStride= img->get_sps().PicWidthInTbsY;
+  //int TUShift = img->get_sps().Log2MinTrafoSize;
+  //int TUStride= img->get_sps().PicWidthInTbsY;
 
   for (int y=yStart;y<yEnd;y+=yIncr)
     for (int x=xStart;x<xEnd;x+=xIncr) {
@@ -297,15 +299,6 @@ void derive_boundaryStrength(de265_image* img, bool vertical, int yStart,int yEn
 
 	    if (shdrP && shdrQ) {
 
-        if (mviP.refIdx[0] > MAX_NUM_REF_PICS ||
-            mviP.refIdx[1] > MAX_NUM_REF_PICS ||
-            mviQ.refIdx[0] > MAX_NUM_REF_PICS ||
-            mviQ.refIdx[1] > MAX_NUM_REF_PICS) {
-          // we cannot return an error from here, so just set a valid boundaryStrength value and continue;
-          img->set_deblk_bS(xDi, yDi, 0);
-          continue;
-        }
-
 	      int refPicP0 = mviP.predFlag[0] ? shdrP->RefPicList[0][ mviP.refIdx[0] ] : -1;
 	      int refPicP1 = mviP.predFlag[1] ? shdrP->RefPicList[1][ mviP.refIdx[1] ] : -1;
 	      int refPicQ0 = mviQ.predFlag[0] ? shdrQ->RefPicList[0][ mviQ.refIdx[0] ] : -1;
@@ -335,18 +328,18 @@ void derive_boundaryStrength(de265_image* img, bool vertical, int yStart,int yEn
 		if (refPicP0 != refPicP1) {
 
 		  if (refPicP0 == refPicQ0) {
-		    if (abs_value(mvP0.x-mvQ0.x) >= 4 ||
-			abs_value(mvP0.y-mvQ0.y) >= 4 ||
-			abs_value(mvP1.x-mvQ1.x) >= 4 ||
-			abs_value(mvP1.y-mvQ1.y) >= 4) {
+		    if (std::abs(mvP0.x-mvQ0.x) >= 4 ||
+			std::abs(mvP0.y-mvQ0.y) >= 4 ||
+			std::abs(mvP1.x-mvQ1.x) >= 4 ||
+			std::abs(mvP1.y-mvQ1.y) >= 4) {
 		      bS = 1;
 		    }
 		  }
 		  else {
-		    if (abs_value(mvP0.x-mvQ1.x) >= 4 ||
-			abs_value(mvP0.y-mvQ1.y) >= 4 ||
-			abs_value(mvP1.x-mvQ0.x) >= 4 ||
-			abs_value(mvP1.y-mvQ0.y) >= 4) {
+		    if (std::abs(mvP0.x-mvQ1.x) >= 4 ||
+			std::abs(mvP0.y-mvQ1.y) >= 4 ||
+			std::abs(mvP1.x-mvQ0.x) >= 4 ||
+			std::abs(mvP1.y-mvQ0.y) >= 4) {
 		      bS = 1;
 		    }
 		  }
@@ -354,22 +347,22 @@ void derive_boundaryStrength(de265_image* img, bool vertical, int yStart,int yEn
 		else {
 		  assert(refPicQ0==refPicQ1);
 
-		  if ((abs_value(mvP0.x-mvQ0.x) >= 4 ||
-		       abs_value(mvP0.y-mvQ0.y) >= 4 ||
-		       abs_value(mvP1.x-mvQ1.x) >= 4 ||
-		       abs_value(mvP1.y-mvQ1.y) >= 4)
+		  if ((std::abs(mvP0.x-mvQ0.x) >= 4 ||
+		       std::abs(mvP0.y-mvQ0.y) >= 4 ||
+		       std::abs(mvP1.x-mvQ1.x) >= 4 ||
+		       std::abs(mvP1.y-mvQ1.y) >= 4)
 		      &&
-		      (abs_value(mvP0.x-mvQ1.x) >= 4 ||
-		       abs_value(mvP0.y-mvQ1.y) >= 4 ||
-		       abs_value(mvP1.x-mvQ0.x) >= 4 ||
-		       abs_value(mvP1.y-mvQ0.y) >= 4)) {
+		      (std::abs(mvP0.x-mvQ1.x) >= 4 ||
+		       std::abs(mvP0.y-mvQ1.y) >= 4 ||
+		       std::abs(mvP1.x-mvQ0.x) >= 4 ||
+		       std::abs(mvP1.y-mvQ0.y) >= 4)) {
 		    bS = 1;
 		  }
 		}
 	      }
 	    }
 	    else {
-	      bS = 0; // if shdrP==NULL or shdrQ==NULL
+	      bS = 0; // if shdrP==nullptr or shdrQ==nullptr
 	    }
 
             /*
@@ -431,8 +424,8 @@ void edge_filtering_luma_internal(de265_image* img, bool vertical,
 
   int bitDepth_Y = sps.BitDepth_Y;
 
-  xEnd = libde265_min(xEnd,img->get_deblk_width());
-  yEnd = libde265_min(yEnd,img->get_deblk_height());
+  xEnd = std::min(xEnd,img->get_deblk_width());
+  yEnd = std::min(yEnd,img->get_deblk_height());
 
   for (int y=yStart;y<yEnd;y+=yIncr)
     for (int x=xStart;x<xEnd;x+=xIncr) {
@@ -541,45 +534,39 @@ void edge_filtering_luma_internal(de265_image* img, bool vertical,
 
         int dE=0, dEp=0, dEq=0;
 
-        if (vertical || !vertical) {
-          int dp0 = abs_value(p[0][2] - 2*p[0][1] + p[0][0]);
-          int dp3 = abs_value(p[3][2] - 2*p[3][1] + p[3][0]);
-          int dq0 = abs_value(q[0][2] - 2*q[0][1] + q[0][0]);
-          int dq3 = abs_value(q[3][2] - 2*q[3][1] + q[3][0]);
+        int dp0 = std::abs(p[0][2] - 2*p[0][1] + p[0][0]);
+        int dp3 = std::abs(p[3][2] - 2*p[3][1] + p[3][0]);
+        int dq0 = std::abs(q[0][2] - 2*q[0][1] + q[0][0]);
+        int dq3 = std::abs(q[3][2] - 2*q[3][1] + q[3][0]);
 
-          int dpq0 = dp0 + dq0;
-          int dpq3 = dp3 + dq3;
+        int dpq0 = dp0 + dq0;
+        int dpq3 = dp3 + dq3;
 
-          int dp = dp0 + dp3;
-          int dq = dq0 + dq3;
-          int d  = dpq0+ dpq3;
+        int dp = dp0 + dp3;
+        int dq = dq0 + dq3;
+        int d = dpq0 + dpq3;
 
-          if (d<beta) {
-            //int dpq = 2*dpq0;
-            bool dSam0 = (2*dpq0 < (beta>>2) &&
-                          abs_value(p[0][3]-p[0][0])+abs_value(q[0][0]-q[0][3]) < (beta>>3) &&
-                          abs_value(p[0][0]-q[0][0]) < ((5*tc+1)>>1));
+        if (d < beta) {
+          //int dpq = 2*dpq0;
+          bool dSam0 = (2 * dpq0 < (beta >> 2) &&
+                        std::abs(p[0][3]-p[0][0]) + std::abs(q[0][0]-q[0][3]) < (beta >> 3) &&
+                        std::abs(p[0][0]-q[0][0]) < ((5 * tc + 1) >> 1));
 
-            bool dSam3 = (2*dpq3 < (beta>>2) &&
-                          abs_value(p[3][3]-p[3][0])+abs_value(q[3][0]-q[3][3]) < (beta>>3) &&
-                          abs_value(p[3][0]-q[3][0]) < ((5*tc+1)>>1));
+          bool dSam3 = (2 * dpq3 < (beta >> 2) &&
+                        std::abs(p[3][3]-p[3][0]) + std::abs(q[3][0]-q[3][3]) < (beta >> 3) &&
+                        std::abs(p[3][0]-q[3][0]) < ((5 * tc + 1) >> 1));
 
-            if (dSam0 && dSam3) {
-              dE=2;
-            }
-            else {
-              dE=1;
-            }
-
-            if (dp < ((beta + (beta>>1))>>3)) { dEp=1; }
-            if (dq < ((beta + (beta>>1))>>3)) { dEq=1; }
-
-            logtrace(LogDeblock,"dE:%d dEp:%d dEq:%d\n",dE,dEp,dEq);
+          if (dSam0 && dSam3) {
+            dE = 2;
           }
-        }
-        else {
-          // TODO
-          assert(0);
+          else {
+            dE = 1;
+          }
+
+          if (dp < ((beta + (beta >> 1)) >> 3)) { dEp = 1; }
+          if (dq < ((beta + (beta >> 1)) >> 3)) { dEq = 1; }
+
+          logtrace(LogDeblock, "dE:%d dEp:%d dEq:%d\n", dE, dEp, dEq);
         }
 
 
@@ -604,109 +591,13 @@ void edge_filtering_luma_internal(de265_image* img, bool vertical,
             if (img->get_cu_transquant_bypass(xDi,yDi)) filterQ=false;
           }
 
-          for (int k=0;k<4;k++) {
-            //int nDp,nDq;
-
-            logtrace(LogDeblock,"line:%d\n",k);
-
-            const pixel_t p0 = p[k][0];
-            const pixel_t p1 = p[k][1];
-            const pixel_t p2 = p[k][2];
-            const pixel_t p3 = p[k][3];
-            const pixel_t q0 = q[k][0];
-            const pixel_t q1 = q[k][1];
-            const pixel_t q2 = q[k][2];
-            const pixel_t q3 = q[k][3];
-
-            if (dE==2) {
-              // strong filtering
-
-              //nDp=nDq=3;
-
-              pixel_t pnew[3],qnew[3];
-              pnew[0] = Clip3(p0-2*tc,p0+2*tc, (p2 + 2*p1 + 2*p0 + 2*q0 + q1 +4)>>3);
-              pnew[1] = Clip3(p1-2*tc,p1+2*tc, (p2 + p1 + p0 + q0+2)>>2);
-              pnew[2] = Clip3(p2-2*tc,p2+2*tc, (2*p3 + 3*p2 + p1 + p0 + q0 + 4)>>3);
-              qnew[0] = Clip3(q0-2*tc,q0+2*tc, (p1+2*p0+2*q0+2*q1+q2+4)>>3);
-              qnew[1] = Clip3(q1-2*tc,q1+2*tc, (p0+q0+q1+q2+2)>>2);
-              qnew[2] = Clip3(q2-2*tc,q2+2*tc, (p0+q0+q1+3*q2+2*q3+4)>>3);
-
-              logtrace(LogDeblock,"strong filtering\n");
-
-              if (vertical) {
-                for (int i=0;i<3;i++) {
-                  if (filterP) { ptr[-i-1+k*stride] = pnew[i]; }
-                  if (filterQ) { ptr[ i + k*stride] = qnew[i]; }
-                }
-
-                // ptr[-1+k*stride] = ptr[ 0+k*stride] = 200;
-              }
-              else {
-                for (int i=0;i<3;i++) {
-                  if (filterP) { ptr[ k -(i+1)*stride] = pnew[i]; }
-                  if (filterQ) { ptr[ k + i   *stride] = qnew[i]; }
-                }
-              }
-            }
-            else {
-              // weak filtering
-
-              //nDp=nDq=0;
-
-              int delta = (9*(q0-p0) - 3*(q1-p1) + 8)>>4;
-              logtrace(LogDeblock,"delta=%d, tc=%d\n",delta,tc);
-
-              if (abs_value(delta) < tc*10) {
-
-                delta = Clip3(-tc,tc,delta);
-                logtrace(LogDeblock," deblk + %d;%d [%02x->%02x]  - %d;%d [%02x->%02x] delta:%d\n",
-                         vertical ? xDi-1 : xDi+k,
-                         vertical ? yDi+k : yDi-1, p0,Clip_BitDepth(p0+delta, bitDepth_Y),
-                         vertical ? xDi   : xDi+k,
-                         vertical ? yDi+k : yDi,   q0,Clip_BitDepth(q0-delta, bitDepth_Y),
-                         delta);
-
-                if (vertical) {
-                  if (filterP) { ptr[-0-1+k*stride] = Clip_BitDepth(p0+delta, bitDepth_Y); }
-                  if (filterQ) { ptr[ 0  +k*stride] = Clip_BitDepth(q0-delta, bitDepth_Y); }
-                }
-                else {
-                  if (filterP) { ptr[ k -1*stride] = Clip_BitDepth(p0+delta, bitDepth_Y); }
-                  if (filterQ) { ptr[ k +0*stride] = Clip_BitDepth(q0-delta, bitDepth_Y); }
-                }
-
-                //ptr[ 0+k*stride] = 200;
-
-                if (dEp==1 && filterP) {
-                  int delta_p = Clip3(-(tc>>1), tc>>1, (((p2+p0+1)>>1)-p1+delta)>>1);
-
-                  logtrace(LogDeblock," deblk dEp %d;%d delta:%d\n",
-                           vertical ? xDi-2 : xDi+k,
-                           vertical ? yDi+k : yDi-2,
-                           delta_p);
-
-                  if (vertical) { ptr[-1-1+k*stride] = Clip_BitDepth(p1+delta_p, bitDepth_Y); }
-                  else          { ptr[ k  -2*stride] = Clip_BitDepth(p1+delta_p, bitDepth_Y); }
-                }
-
-                if (dEq==1 && filterQ) {
-                  int delta_q = Clip3(-(tc>>1), tc>>1, (((q2+q0+1)>>1)-q1-delta)>>1);
-
-                  logtrace(LogDeblock," delkb dEq %d;%d delta:%d\n",
-                           vertical ? xDi+1 : xDi+k,
-                           vertical ? yDi+k : yDi+1,
-                           delta_q);
-
-                  if (vertical) { ptr[ 1  +k*stride] = Clip_BitDepth(q1+delta_q, bitDepth_Y); }
-                  else          { ptr[ k  +1*stride] = Clip_BitDepth(q1+delta_q, bitDepth_Y); }
-                }
-
-                //nDp = dEp+1;
-                //nDq = dEq+1;
-
-                //logtrace(LogDeblock,"weak filtering (%d:%d)\n",nDp,nDq);
-              }
-            }
+          if constexpr (sizeof(pixel_t)==1) {
+            img->decctx->acceleration.deblock_luma_8((uint8_t*)ptr, stride, vertical,
+                                                     dE,dEp,dEq,tc, filterP,filterQ);
+          }
+          else {
+            deblock_luma_kernel<pixel_t>(ptr, stride, vertical,
+                                         dE,dEp,dEq,tc, filterP,filterQ, bitDepth_Y);
           }
         }
       }
@@ -761,8 +652,8 @@ void edge_filtering_chroma_internal(de265_image* img, bool vertical,
 
   const int stride = img->get_image_stride(1);
 
-  xEnd = libde265_min(xEnd,img->get_deblk_width());
-  yEnd = libde265_min(yEnd,img->get_deblk_height());
+  xEnd = std::min(xEnd,img->get_deblk_width());
+  yEnd = std::min(yEnd,img->get_deblk_height());
 
   int bitDepth_C = sps.BitDepth_C;
 
@@ -785,23 +676,6 @@ void edge_filtering_chroma_internal(de265_image* img, bool vertical,
 
           pixel_t* ptr = img->get_image_plane_at_pos_NEW<pixel_t>(cplane+1, xDi,yDi);
 
-          pixel_t p[2][4];
-          pixel_t q[2][4];
-
-          logtrace(LogDeblock,"-%s- %d %d\n",cplane==0 ? "Cb" : "Cr",xDi,yDi);
-
-          for (int i=0;i<2;i++)
-            for (int k=0;k<4;k++)
-              {
-                if (vertical) {
-                  q[i][k] = ptr[ i  +k*stride];
-                  p[i][k] = ptr[-i-1+k*stride];
-                }
-                else {
-                  q[i][k] = ptr[k + i   *stride];
-                  p[i][k] = ptr[k -(i+1)*stride];
-                }
-              }
 
 #if 0
           for (int k=0;k<4;k++)
@@ -830,7 +704,7 @@ void edge_filtering_chroma_internal(de265_image* img, bool vertical,
           if (sps.ChromaArrayType == CHROMA_420) {
             QP_C = table8_22(qP_i);
           } else {
-            QP_C = libde265_min(qP_i, 51);
+            QP_C = std::min(qP_i, 51);
           }
 
 
@@ -858,11 +732,11 @@ void edge_filtering_chroma_internal(de265_image* img, bool vertical,
             if (img->get_cu_transquant_bypass(SubWidthC*xDi,SubHeightC*yDi)) filterQ=false;
 
 
-            for (int k=0;k<4;k++) {
-              int delta = Clip3(-tc,tc, ((((q[0][k]-p[0][k])*4)+p[1][k]-q[1][k]+4)>>3)); // standard says <<2 in eq. (8-356), but the value can also be negative
-              logtrace(LogDeblock,"delta=%d\n",delta);
-              if (filterP) { ptr[-1+k*stride] = Clip_BitDepth(p[0][k]+delta, bitDepth_C); }
-              if (filterQ) { ptr[ 0+k*stride] = Clip_BitDepth(q[0][k]-delta, bitDepth_C); }
+            if constexpr (sizeof(pixel_t)==1) {
+              img->decctx->acceleration.deblock_chroma_8((uint8_t*)ptr, stride, 1, tc, filterP,filterQ);
+            }
+            else {
+              deblock_chroma_kernel<pixel_t>(ptr, stride, true, tc, filterP,filterQ, bitDepth_C);
             }
           }
           else {
@@ -874,10 +748,11 @@ void edge_filtering_chroma_internal(de265_image* img, bool vertical,
             if (sps.pcm_loop_filter_disable_flag && img->get_pcm_flag(SubWidthC*xDi,SubHeightC*yDi)) filterQ=false;
             if (img->get_cu_transquant_bypass(SubWidthC*xDi,SubHeightC*yDi)) filterQ=false;
 
-            for (int k=0;k<4;k++) {
-              int delta = Clip3(-tc,tc, ((((q[0][k]-p[0][k])*4)+p[1][k]-q[1][k]+4)>>3)); // standard says <<2, but the value can also be negative
-              if (filterP) { ptr[ k-1*stride] = Clip_BitDepth(p[0][k]+delta, bitDepth_C); }
-              if (filterQ) { ptr[ k+0*stride] = Clip_BitDepth(q[0][k]-delta, bitDepth_C); }
+            if constexpr (sizeof(pixel_t)==1) {
+              img->decctx->acceleration.deblock_chroma_8((uint8_t*)ptr, stride, 0, tc, filterP,filterQ);
+            }
+            else {
+              deblock_chroma_kernel<pixel_t>(ptr, stride, false, tc, filterP,filterQ, bitDepth_C);
             }
           }
         }
@@ -920,7 +795,7 @@ public:
   virtual void work();
   virtual std::string name() const {
     char buf[100];
-    snprintf(buf, sizeof(buf), "deblock-%d", ctb_y);
+    sprintf(buf,"deblock-%d",ctb_y);
     return buf;
   }
 };
@@ -1011,7 +886,6 @@ void add_deblocking_tasks(image_unit* imgunit)
 
   int nRows = img->get_sps().PicHeightInCtbsY;
 
-  int n=0;
   img->thread_start(nRows*2);
 
   for (int pass=0;pass<2;pass++)
@@ -1025,8 +899,7 @@ void add_deblocking_tasks(image_unit* imgunit)
           task->vertical = (pass==0);
 
           imgunit->tasks.push_back(task);
-          add_task(&ctx->thread_pool_, task);
-          n++;
+          ctx->thread_pool_.add_task(task);
         }
     }
 }
@@ -1034,7 +907,7 @@ void add_deblocking_tasks(image_unit* imgunit)
 
 void apply_deblocking_filter(de265_image* img) // decoder_context* ctx)
 {
-  decoder_context* ctx = img->decctx;
+  //decoder_context* ctx = img->decctx;
 
   char enabled_deblocking = derive_edgeFlags(img);
 

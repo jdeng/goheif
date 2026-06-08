@@ -99,7 +99,7 @@ void initialize_CABAC_models(context_model context_model_table[CONTEXT_MODEL_TAB
 class context_model_table
 {
  public:
-  context_model_table();
+  context_model_table() = default;
   context_model_table(const context_model_table&);
   ~context_model_table();
 
@@ -109,7 +109,7 @@ class context_model_table
   context_model_table transfer();
   context_model_table copy() const { context_model_table t=*this; t.decouple(); return t; }
 
-  bool empty() const { return refcnt != NULL; }
+  bool empty() const { return refcnt != nullptr; }
 
   context_model& operator[](int i) { return model[i]; }
 
@@ -122,8 +122,8 @@ class context_model_table
  private:
   void decouple_or_alloc_with_empty_data();
 
-  context_model* model; // [CONTEXT_MODEL_TABLE_LENGTH]
-  int* refcnt;
+  context_model* model = nullptr; // [CONTEXT_MODEL_TABLE_LENGTH]
+  int* refcnt = nullptr;
 };
 
 

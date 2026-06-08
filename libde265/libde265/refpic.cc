@@ -79,14 +79,14 @@ void ref_pic_set::compute_derived_values()
    - as a list of the relative POC deltas themselves, or
    - by shifting an existing ref-pic-set by some number of frames
    When shifting an existing set, the frame 0 is also shifted as an additional reference frame.
-   When coding the ref-pic-sets in the SPS, predicition is always from the previous set.
+   When coding the ref-pic-sets in the SPS, prediction is always from the previous set.
    In the slice header, the ref-pic-set can use any previous set as reference.
  */
 bool read_short_term_ref_pic_set(error_queue* errqueue,
                                  const seq_parameter_set* sps,
                                  bitreader* br,
                                  ref_pic_set* out_set, // where to store the read set
-                                 int idxRps,  // index of the set to be read
+                                 uint32_t idxRps,  // index of the set to be read
                                  const std::vector<ref_pic_set>& sets, // previously read sets
                                  bool sliceRefPicSet) // is this in the slice header?
 {
@@ -95,7 +95,7 @@ bool read_short_term_ref_pic_set(error_queue* errqueue,
   char inter_ref_pic_set_prediction_flag;
 
   if (idxRps != 0) {
-    inter_ref_pic_set_prediction_flag = get_bits(br,1);
+    inter_ref_pic_set_prediction_flag = br->get_bits(1);
   }
   else {
     inter_ref_pic_set_prediction_flag = 0;
@@ -104,34 +104,32 @@ bool read_short_term_ref_pic_set(error_queue* errqueue,
 
 
   if (inter_ref_pic_set_prediction_flag) {
-    int vlc;
+    uint32_t vlc;
 
     /* Only for the last ref_pic_set (that's the one coded in the slice header),
        we can specify relative to which reference set we code the set. */
 
-    int delta_idx;
+    uint32_t delta_idx;
     if (sliceRefPicSet) { // idxRps == num_short_term_ref_pic_sets) {
-      delta_idx = vlc = get_uvlc(br);
-      if (delta_idx==UVLC_ERROR) {
+      vlc = br->get_uvlc();
+      if (vlc==UVLC_ERROR || vlc >= idxRps) {
         return false;
       }
-
-      if (delta_idx>=idxRps) {
-        return false;
-      }
+      delta_idx = vlc;
 
       delta_idx++;
     } else {
       delta_idx = 1;
     }
 
-    int RIdx = idxRps - delta_idx; // this is our source set, which we will modify
-    assert(RIdx>=0);
+    assert(idxRps >= delta_idx);
+    int RIdx = idxRps - delta_idx; // this is our source set, which we will modify (TODO: change type to uint8_t)
 
-    int delta_rps_sign = get_bits(br,1);
-    int abs_delta_rps  = vlc = get_uvlc(br);
-    if (vlc==UVLC_ERROR) { return false; }
-    abs_delta_rps++;
+    int delta_rps_sign = br->get_bits(1);
+    vlc = br->get_uvlc();
+    // abs_delta_rps_minus1 shall be in [0, 2^15-1] (Sec. 7.4.8)
+    if (vlc==UVLC_ERROR || vlc > 32767) { return false; }
+    uint16_t abs_delta_rps = vlc + 1;
     int DeltaRPS = (delta_rps_sign ? -abs_delta_rps : abs_delta_rps);
 
     // bits are stored in this order:
@@ -147,11 +145,11 @@ bool read_short_term_ref_pic_set(error_queue* errqueue,
     char *const use_delta_flag = (char *)alloca((nDeltaPocsRIdx+1) * sizeof(char));
 
     for (int j=0;j<=nDeltaPocsRIdx;j++) {
-      used_by_curr_pic_flag[j] = get_bits(br,1);
+      used_by_curr_pic_flag[j] = br->get_bits(1);
       if (used_by_curr_pic_flag[j]) {
         use_delta_flag[j] = 1;  // if this frame is used, we also have to apply the delta
       } else {
-        use_delta_flag[j] = get_bits(br,1);  // otherwise, it is only optionally included
+        use_delta_flag[j] = br->get_bits(1);  // otherwise, it is only optionally included
       }
     }
 
@@ -171,7 +169,7 @@ bool read_short_term_ref_pic_set(error_queue* errqueue,
 
     // positive list
     for (int j=nPositiveRIdx-1;j>=0;j--) {
-      assert(RIdx >= 0 && RIdx < sets.size());
+      assert(RIdx >= 0 && static_cast<size_t>(RIdx) < sets.size());
       assert(j>=0 && j < MAX_NUM_REF_PICS);
 
       int dPoc = sets[RIdx].DeltaPocS1[j] + DeltaRPS; // new delta
@@ -252,31 +250,26 @@ bool read_short_term_ref_pic_set(error_queue* errqueue,
 
     // --- first, read the number of past and future frames in this set ---
 
-    int num_negative_pics = get_uvlc(br);
-    int num_positive_pics = get_uvlc(br);
+    uint32_t num_negative_pics = br->get_uvlc();
+    uint32_t num_positive_pics = br->get_uvlc();
 
     if (num_negative_pics == UVLC_ERROR ||
-        num_positive_pics == UVLC_ERROR) {
-      // invalid num-ref-pics value
+        num_positive_pics == UVLC_ERROR ||
+        num_negative_pics > MAX_NUM_REF_PICS ||
+        num_positive_pics > MAX_NUM_REF_PICS) {
       errqueue->add_warning(DE265_WARNING_MAX_NUM_REF_PICS_EXCEEDED, false);
       return false;
     }
 
     // total number of reference pictures may not exceed buffer capacity
     if (num_negative_pics + num_positive_pics >
-        sps->sps_max_dec_pic_buffering[ sps->sps_max_sub_layers-1 ]) {
+        static_cast<uint32_t>(sps->sps_max_dec_pic_buffering[ sps->sps_max_sub_layers-1 ])) {
 
       out_set->NumNegativePics = 0;
       out_set->NumPositivePics = 0;
       out_set->NumDeltaPocs = 0;
       out_set->NumPocTotalCurr_shortterm_only = 0;
 
-      errqueue->add_warning(DE265_WARNING_MAX_NUM_REF_PICS_EXCEEDED, false);
-      return false;
-    }
-
-    if (num_negative_pics > MAX_NUM_REF_PICS ||
-        num_positive_pics > MAX_NUM_REF_PICS) {
       errqueue->add_warning(DE265_WARNING_MAX_NUM_REF_PICS_EXCEEDED, false);
       return false;
     }
@@ -288,35 +281,62 @@ bool read_short_term_ref_pic_set(error_queue* errqueue,
 
     // past frames
 
-    int lastPocS=0;
-    for (int i=0;i<num_negative_pics;i++) {
-      int  delta_poc_s0 = get_uvlc(br);
+    int16_t lastPocS=0;
+    for (uint32_t i=0;i<num_negative_pics;i++) {
+      uint32_t delta_poc_s0 = br->get_uvlc();
       if (delta_poc_s0==UVLC_ERROR) { return false; }
       delta_poc_s0++;
-      char used_by_curr_pic_s0_flag = get_bits(br,1);
+      char used_by_curr_pic_s0_flag = br->get_bits(1);
 
-      out_set->DeltaPocS0[i]      = lastPocS - delta_poc_s0;
+      if (delta_poc_s0 > static_cast<uint32_t>(lastPocS - INT16_MIN)) {
+        errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+        return false;
+      }
+      // cast to int because delta_poc_s0 can be up to 32768 when lastPocS==0
+      int16_t pocS = lastPocS - static_cast<int>(delta_poc_s0);
+      out_set->DeltaPocS0[i]      = pocS;
       out_set->UsedByCurrPicS0[i] = used_by_curr_pic_s0_flag;
-      lastPocS = out_set->DeltaPocS0[i];
+      lastPocS = pocS;
     }
 
     // future frames
 
-    lastPocS=0;
-    for (int i=0;i<num_positive_pics;i++) {
-      int  delta_poc_s1 = get_uvlc(br);
+    lastPocS = 0;
+    for (uint32_t i=0;i<num_positive_pics;i++) {
+      uint32_t delta_poc_s1 = br->get_uvlc();
       if (delta_poc_s1==UVLC_ERROR) { return false; }
       delta_poc_s1++;
-      char used_by_curr_pic_s1_flag = get_bits(br,1);
+      char used_by_curr_pic_s1_flag = br->get_bits(1);
 
-      out_set->DeltaPocS1[i]      = lastPocS + delta_poc_s1;
+      if (delta_poc_s1 > static_cast<uint32_t>(INT16_MAX - lastPocS)) {
+        errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+        return false;
+      }
+      int16_t pocS = lastPocS + static_cast<int16_t>(delta_poc_s1);
+      out_set->DeltaPocS1[i]      = pocS;
       out_set->UsedByCurrPicS1[i] = used_by_curr_pic_s1_flag;
-      lastPocS = out_set->DeltaPocS1[i];
+      lastPocS = pocS;
     }
   }
 
 
   out_set->compute_derived_values();
+
+  // The unused short-term references are all collected into a single PocStFoll array
+  // of MAX_NUM_REF_PICS entries (see decoder_context::process_reference_picture_set).
+  // While each individual list is bounded above, the predicted-RPS construction can
+  // append the current-picture delta to an already-full source set, pushing the
+  // combined count past MAX_NUM_REF_PICS. Reject such sets to avoid an out-of-bounds
+  // write when filling PocStFoll.
+  if (out_set->NumDeltaPocs > MAX_NUM_REF_PICS) {
+    out_set->NumNegativePics = 0;
+    out_set->NumPositivePics = 0;
+    out_set->NumDeltaPocs = 0;
+    out_set->NumPocTotalCurr_shortterm_only = 0;
+
+    errqueue->add_warning(DE265_WARNING_MAX_NUM_REF_PICS_EXCEEDED, false);
+    return false;
+  }
 
   return true;
 }
@@ -326,7 +346,7 @@ bool write_short_term_ref_pic_set_nopred(error_queue* errqueue,
                                          const seq_parameter_set* sps,
                                          CABAC_encoder& out,
                                          const ref_pic_set* in_set, // which set to write
-                                         int idxRps,  // index of the set to be written
+                                         uint32_t idxRps,  // index of the set to be written
                                          const std::vector<ref_pic_set>& sets, // previously read sets
                                          bool sliceRefPicSet) // is this in the slice header?
 {
@@ -377,7 +397,7 @@ bool write_short_term_ref_pic_set(error_queue* errqueue,
                                   const seq_parameter_set* sps,
                                   CABAC_encoder& out,
                                   const ref_pic_set* in_set, // which set to write
-                                  int idxRps,  // index of the set to be read
+                                  uint32_t idxRps,  // index of the set to be read
                                   const std::vector<ref_pic_set>& sets, // previously read sets
                                   bool sliceRefPicSet) // is this in the slice header?
 {

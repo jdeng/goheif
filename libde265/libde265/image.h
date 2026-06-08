@@ -26,9 +26,11 @@
 #endif
 
 #include <assert.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits>
 #include <memory>
 
 #include "libde265/de265.h"
@@ -52,47 +54,46 @@ enum PictureState {
    At INTEGRITY_DERIVED_FROM_FAULTY_REFERENCE images, we can check the SEI hash, whether
    the output image is correct despite the faulty reference, and set the state back to correct.
 */
-#define INTEGRITY_CORRECT 0
-#define INTEGRITY_UNAVAILABLE_REFERENCE 1
-#define INTEGRITY_NOT_DECODED 2
-#define INTEGRITY_DECODING_ERRORS 3
-#define INTEGRITY_DERIVED_FROM_FAULTY_REFERENCE 4
+constexpr uint8_t INTEGRITY_CORRECT = 0;
+constexpr uint8_t INTEGRITY_UNAVAILABLE_REFERENCE = 1;
+constexpr uint8_t INTEGRITY_NOT_DECODED = 2;
+constexpr uint8_t INTEGRITY_DECODING_ERRORS = 3;
+constexpr uint8_t INTEGRITY_DERIVED_FROM_FAULTY_REFERENCE = 4;
 
-#define SEI_HASH_UNCHECKED 0
-#define SEI_HASH_CORRECT   1
-#define SEI_HASH_INCORRECT 2
+constexpr uint8_t SEI_HASH_UNCHECKED = 0;
+constexpr uint8_t SEI_HASH_CORRECT   = 1;
+constexpr uint8_t SEI_HASH_INCORRECT = 2;
 
-#define TU_FLAG_NONZERO_COEFF  (1<<7)
-#define TU_FLAG_SPLIT_TRANSFORM_MASK  0x1F
+constexpr uint8_t TU_FLAG_NONZERO_COEFF  = (1<<7);
+constexpr uint8_t TU_FLAG_SPLIT_TRANSFORM_MASK  = 0x1F;
 
-#define DEBLOCK_FLAG_VERTI (1<<4)
-#define DEBLOCK_FLAG_HORIZ (1<<5)
-#define DEBLOCK_PB_EDGE_VERTI (1<<6)
-#define DEBLOCK_PB_EDGE_HORIZ (1<<7)
-#define DEBLOCK_BS_MASK     0x03
+constexpr uint8_t DEBLOCK_FLAG_VERTI = (1<<4);
+constexpr uint8_t DEBLOCK_FLAG_HORIZ = (1<<5);
+constexpr uint8_t DEBLOCK_PB_EDGE_VERTI = (1<<6);
+constexpr uint8_t DEBLOCK_PB_EDGE_HORIZ = (1<<7);
+constexpr uint8_t DEBLOCK_BS_MASK     = 0x03;
 
-
-#define CTB_PROGRESS_NONE      0
-#define CTB_PROGRESS_PREFILTER 1
-#define CTB_PROGRESS_DEBLK_V   2
-#define CTB_PROGRESS_DEBLK_H   3
-#define CTB_PROGRESS_SAO       4
+constexpr int CTB_PROGRESS_NONE      = 0;
+constexpr int CTB_PROGRESS_PREFILTER = 1;
+constexpr int CTB_PROGRESS_DEBLK_V   = 2;
+constexpr int CTB_PROGRESS_DEBLK_H   = 3;
+constexpr int CTB_PROGRESS_SAO       = 4;
 
 class decoder_context;
 
 template <class DataUnit> class MetaDataArray
 {
  public:
-  MetaDataArray() { data=NULL; data_size=0; log2unitSize=0; width_in_units=0; height_in_units=0; }
+  MetaDataArray() = default;
   ~MetaDataArray() { free(data); }
 
-  LIBDE265_CHECK_RESULT bool alloc(int w,int h, int _log2unitSize) {
+  LIBDE265_CHECK_RESULT bool alloc(int w,int h, uint8_t _log2unitSize) {
     int size = w*h;
 
     if (size != data_size) {
       free(data);
-      data = (DataUnit*)malloc(size * sizeof(DataUnit));
-      if (data == NULL) {
+      data = (DataUnit*)calloc(size, sizeof(DataUnit));
+      if (data == nullptr) {
         data_size = 0;
         return false;
       }
@@ -104,7 +105,7 @@ template <class DataUnit> class MetaDataArray
 
     log2unitSize = _log2unitSize;
 
-    return data != NULL;
+    return data != nullptr;
   }
 
   void clear() {
@@ -147,35 +148,16 @@ template <class DataUnit> class MetaDataArray
   int size() const { return data_size; }
 
   // private:
-  DataUnit* data;
-  int data_size;
-  int log2unitSize;
-  int width_in_units;
-  int height_in_units;
+  DataUnit* data = nullptr;
+  int data_size = 0;
+  uint8_t log2unitSize = 0;
+  int width_in_units = 0;
+  int height_in_units = 0;
 };
 
-#define SET_CB_BLK(x,y,log2BlkWidth,  Field,value)              \
-  int cbX = x >> cb_info.log2unitSize; \
-  int cbY = y >> cb_info.log2unitSize; \
-  int width = 1 << (log2BlkWidth - cb_info.log2unitSize);           \
-  for (int cby=cbY;cby<cbY+width;cby++)                             \
-    for (int cbx=cbX;cbx<cbX+width;cbx++)                           \
-      {                                                             \
-        cb_info[ cbx + cby*cb_info.width_in_units ].Field = value;  \
-      }
-
-#define CLEAR_TB_BLK(x,y,log2BlkWidth)              \
-  int tuX = x >> tu_info.log2unitSize; \
-  int tuY = y >> tu_info.log2unitSize; \
-  int width = 1 << (log2BlkWidth - tu_info.log2unitSize);           \
-  for (int tuy=tuY;tuy<tuY+width;tuy++)                             \
-    for (int tux=tuX;tux<tuX+width;tux++)                           \
-      {                                                             \
-        tu_info[ tux + tuy*tu_info.width_in_units ] = 0;  \
-      }
 
 
-typedef struct {
+struct CTB_info {
   uint16_t SliceAddrRS;
   uint16_t SliceHeaderIndex; // index into array to slice header for this CTB
 
@@ -185,10 +167,10 @@ typedef struct {
   // The following flag helps to quickly check whether we have to
   // check all conditions in the SAO filter or whether we can skip them.
   bool     has_pcm_or_cu_transquant_bypass; // pcm or transquant_bypass is used in this CTB
-} CTB_info;
+};
 
 
-typedef struct {
+struct CB_ref_info {
   uint8_t log2CbSize : 3;   /* [0;6] (1<<log2CbSize) = 64
                                This is only set in the top-left corner of the CB.
                                The other values should be zero.
@@ -210,8 +192,7 @@ typedef struct {
 
   // --- byte boundary ---
   int8_t  QP_Y;  // Stored for QP prediction
-
-} CB_ref_info;
+};
 
 
 
@@ -221,7 +202,7 @@ struct de265_image {
   ~de265_image();
 
 
-  de265_error alloc_image(int w,int h, enum de265_chroma c,
+  de265_error alloc_image(int w,int h, de265_chroma c,
                           std::shared_ptr<const seq_parameter_set> sps,
                           bool allocMetadata,
                           decoder_context* dctx,
@@ -231,7 +212,7 @@ struct de265_image {
 
   //de265_error alloc_encoder_data(const seq_parameter_set* sps);
 
-  bool is_allocated() const { return pixels[0] != NULL; }
+  bool is_allocated() const { return pixels[0] != nullptr; }
 
   void release();
 
@@ -244,6 +225,7 @@ struct de265_image {
   }
 
   void fill_image(int y,int u,int v);
+  void fill_plane(int channel, int value);
   de265_error copy_image(const de265_image* src);
   void copy_lines_from(const de265_image* src, int first, int end);
   void exchange_pixel_data_with(de265_image&);
@@ -254,11 +236,11 @@ struct de265_image {
   /* */ uint8_t* get_image_plane(int cIdx)       { return pixels[cIdx]; }
   const uint8_t* get_image_plane(int cIdx) const { return pixels[cIdx]; }
 
-  void set_image_plane(int cIdx, uint8_t* mem, int stride, void *userdata);
+  void set_image_plane(int cIdx, uint8_t* mem, ptrdiff_t stride, void *userdata);
 
   uint8_t* get_image_plane_at_pos(int cIdx, int xpos,int ypos)
   {
-    int stride = get_image_stride(cIdx);
+    ptrdiff_t stride = get_image_stride(cIdx);
     return pixels[cIdx] + xpos + ypos*stride;
   }
 
@@ -267,43 +249,43 @@ struct de265_image {
   template <class pixel_t>
   pixel_t* get_image_plane_at_pos_NEW(int cIdx, int xpos,int ypos)
   {
-    int stride = get_image_stride(cIdx);
+    ptrdiff_t stride = get_image_stride(cIdx);
     return (pixel_t*)(pixels[cIdx] + (xpos + ypos*stride)*sizeof(pixel_t));
   }
 
   const uint8_t* get_image_plane_at_pos(int cIdx, int xpos,int ypos) const
   {
-    int stride = get_image_stride(cIdx);
+    ptrdiff_t stride = get_image_stride(cIdx);
     return pixels[cIdx] + xpos + ypos*stride;
   }
 
   void* get_image_plane_at_pos_any_depth(int cIdx, int xpos,int ypos)
   {
-    int stride = get_image_stride(cIdx);
+    ptrdiff_t stride = get_image_stride(cIdx);
     return pixels[cIdx] + ((xpos + ypos*stride) << bpp_shift[cIdx]);
   }
 
   const void* get_image_plane_at_pos_any_depth(int cIdx, int xpos,int ypos) const
   {
-    int stride = get_image_stride(cIdx);
+    ptrdiff_t stride = get_image_stride(cIdx);
     return pixels[cIdx] + ((xpos + ypos*stride) << bpp_shift[cIdx]);
   }
 
   /* Number of pixels in one row (not number of bytes).
    */
-  int get_image_stride(int cIdx) const
+  ptrdiff_t get_image_stride(int cIdx) const
   {
     if (cIdx==0) return stride;
     else         return chroma_stride;
   }
 
-  int get_luma_stride() const { return stride; }
-  int get_chroma_stride() const { return chroma_stride; }
+  ptrdiff_t get_luma_stride() const { return stride; }
+  ptrdiff_t get_chroma_stride() const { return chroma_stride; }
 
   int get_width (int cIdx=0) const { return cIdx==0 ? width  : chroma_width;  }
   int get_height(int cIdx=0) const { return cIdx==0 ? height : chroma_height; }
 
-  enum de265_chroma get_chroma_format() const { return chroma_format; }
+  de265_chroma get_chroma_format() const { return chroma_format; }
 
   int get_bit_depth(int cIdx) const {
     if (cIdx==0) return sps->BitDepth_Y;
@@ -342,61 +324,59 @@ struct de265_image {
   }
 
 private:
-  uint32_t ID;
-  static uint32_t s_next_image_ID;
+  uint32_t ID = std::numeric_limits<uint32_t>::max();
 
-  uint8_t* pixels[3];
-  uint8_t  bpp_shift[3];  // 0 for 8 bit, 1 for 16 bit
+  uint8_t* pixels[3] = { nullptr, nullptr, nullptr };
+  uint8_t  bpp_shift[3] = {};  // 0 for 8 bit, 1 for 16 bit
 
-  enum de265_chroma chroma_format;
+  de265_chroma chroma_format = de265_chroma_mono;
 
-  int width, height;  // size in luma pixels
+  int width = 0, height = 0;  // size in luma pixels
 
-  int chroma_width, chroma_height;
-  int stride, chroma_stride;
+  int chroma_width = 0, chroma_height = 0;
+  ptrdiff_t stride = 0, chroma_stride = 0;
 
 public:
-  uint8_t BitDepth_Y, BitDepth_C;
-  uint8_t SubWidthC, SubHeightC;
+  uint8_t BitDepth_Y = 0, BitDepth_C = 0;
+  uint8_t SubWidthC = 0, SubHeightC = 0;
   std::vector<slice_segment_header*> slices;
 
 public:
 
   // --- conformance cropping window ---
 
-  uint8_t* pixels_confwin[3];   // pointer to pixels in the conformance window
+  uint8_t* pixels_confwin[3] = { nullptr, nullptr, nullptr };
 
-  int width_confwin, height_confwin;
-  int chroma_width_confwin, chroma_height_confwin;
+  int width_confwin = 0, height_confwin = 0;
+  int chroma_width_confwin = 0, chroma_height_confwin = 0;
 
   // --- decoding info ---
 
   // If PicOutputFlag==false && PicState==UnusedForReference, image buffer is free.
 
-  int  picture_order_cnt_lsb;
-  int  PicOrderCntVal;
-  enum PictureState PicState;
-  bool PicOutputFlag;
+  int  picture_order_cnt_lsb = -1; // undefined
+  int  PicOrderCntVal = -1; // undefined
+  PictureState PicState = UnusedForReference;
+  bool PicOutputFlag = false;
 
-  int32_t removed_at_picture_id;
+  uint32_t removed_at_picture_id = 0; // picture not used, so we can assume it has been removed
 
   const video_parameter_set& get_vps() const { return *vps; }
   const seq_parameter_set& get_sps() const { return *sps; }
   const pic_parameter_set& get_pps() const { return *pps; }
 
-  bool has_vps() const { return (bool)vps; }
-  bool has_sps() const { return (bool)sps; }
-  bool has_pps() const { return (bool)pps; }
+  bool has_vps() const { return vps != nullptr; }
+  bool has_sps() const { return sps != nullptr; }
+  bool has_pps() const { return pps != nullptr; }
 
   std::shared_ptr<const seq_parameter_set> get_shared_sps() { return sps; }
 
   //std::shared_ptr<const seq_parameter_set> get_shared_sps() const { return sps; }
   //std::shared_ptr<const pic_parameter_set> get_shared_pps() const { return pps; }
 
-  decoder_context*    decctx;
-  //class encoder_context*    encctx;
+  decoder_context*    decctx = nullptr;
 
-  int number_of_ctbs() const { return ctb_info.size(); }
+  [[nodiscard]] uint32_t number_of_ctbs() const { return static_cast<uint32_t>(ctb_info.size()); }
 
 private:
   // The image also keeps a reference to VPS/SPS/PPS, because when decoding is delayed,
@@ -414,12 +394,31 @@ private:
   MetaDataArray<uint8_t>     tu_info;
   MetaDataArray<uint8_t>     deblk_info;
 
+  template<typename Func>
+  void set_cb_blk(int x, int y, int log2BlkWidth, Func setter) {
+    int cbX = x >> cb_info.log2unitSize;
+    int cbY = y >> cb_info.log2unitSize;
+    int width = 1 << (log2BlkWidth - cb_info.log2unitSize);
+    for (int cby=cbY;cby<cbY+width;cby++)
+      for (int cbx=cbX;cbx<cbX+width;cbx++)
+        setter(cb_info[ cbx + cby*cb_info.width_in_units ]);
+  }
+
+  void clear_tb_blk(int x, int y, int log2BlkWidth) {
+    int tuX = x >> tu_info.log2unitSize;
+    int tuY = y >> tu_info.log2unitSize;
+    int width = 1 << (log2BlkWidth - tu_info.log2unitSize);
+    for (int tuy=tuY;tuy<tuY+width;tuy++)
+      for (int tux=tuX;tux<tuX+width;tux++)
+        tu_info[ tux + tuy*tu_info.width_in_units ] = 0;
+  }
+
 public:
   // --- meta information ---
 
-  de265_PTS pts;
-  void*     user_data;
-  void*     plane_user_data[3];  // this is logically attached to the pixel data pointers
+  de265_PTS pts = 0;
+  void*     user_data = nullptr;
+  void*     plane_user_data[3] = { nullptr, nullptr, nullptr };
   de265_image_allocation image_allocation_functions; // the functions used for memory allocation
 
   /*
@@ -428,17 +427,17 @@ public:
                                      void* userdata);
   */
 
-  uint8_t integrity; /* Whether an error occured while the image was decoded.
-                        When generated, this is initialized to INTEGRITY_CORRECT,
-                        and changed on decoding errors.
-                      */
-  bool sei_hash_check_result;
+  uint8_t integrity = INTEGRITY_NOT_DECODED; /* Whether an error occurred while the image was decoded.
+                                                When generated, this is initialized to INTEGRITY_CORRECT,
+                                                and changed on decoding errors.
+                                              */
+  bool sei_hash_check_result = false;
 
   nal_header nal_hdr;
 
   // --- multi core ---
 
-  de265_progress_lock* ctb_progress; // ctb_info_size
+  de265_progress_lock* ctb_progress = nullptr; // ctb_info_size
 
   void mark_all_CTB_progress(int progress) {
     for (int i=0;i<ctb_info.data_size;i++) {
@@ -464,15 +463,15 @@ public:
   int  num_threads_active() const { return nThreadsRunning + nThreadsBlocked; } // for debug only
 
   //private:
-  int   nThreadsQueued;
-  int   nThreadsRunning;
-  int   nThreadsBlocked;
-  int   nThreadsFinished;
-  int   nThreadsTotal;
+  int   nThreadsQueued = 0;
+  int   nThreadsRunning = 0;
+  int   nThreadsBlocked = 0;
+  int   nThreadsFinished = 0;
+  int   nThreadsTotal = 0;
 
   // ALIGNED_8(de265_sync_int tasks_pending); // number of tasks pending to complete decoding
-  de265_mutex mutex;
-  de265_cond  finished_cond;
+  std::mutex mutex;
+  std::condition_variable finished_cond;
 
 public:
 
@@ -484,20 +483,20 @@ public:
 
   // --- CB metadata access ---
 
-  void set_pred_mode(int x,int y, int log2BlkWidth, enum PredMode mode)
+  void set_pred_mode(int x,int y, int log2BlkWidth, PredMode mode)
   {
-    SET_CB_BLK(x,y,log2BlkWidth, PredMode, mode);
+    set_cb_blk(x,y,log2BlkWidth, [mode](CB_ref_info& cb){ cb.PredMode = mode; });
   }
 
-  void fill_pred_mode(enum PredMode mode)
+  void fill_pred_mode(PredMode mode)
   {
     for (int i=0;i<cb_info.data_size;i++)
       { cb_info[i].PredMode = MODE_INTRA; }
   }
 
-  enum PredMode get_pred_mode(int x,int y) const
+  PredMode get_pred_mode(int x,int y) const
   {
-    return (enum PredMode)cb_info.get(x,y).PredMode;
+    return (PredMode)cb_info.get(x,y).PredMode;
   }
 
   uint8_t get_cu_skip_flag(int x,int y) const
@@ -507,7 +506,7 @@ public:
 
   void set_pcm_flag(int x,int y, int log2BlkWidth, uint8_t value=1)
   {
-    SET_CB_BLK(x,y,log2BlkWidth, pcm_flag, value);
+    set_cb_blk(x,y,log2BlkWidth, [value](CB_ref_info& cb){ cb.pcm_flag = value; });
 
     // TODO: in the encoder, we somewhere have to clear this
     ctb_info.get(x,y).has_pcm_or_cu_transquant_bypass = true;
@@ -520,7 +519,7 @@ public:
 
   void set_cu_transquant_bypass(int x,int y, int log2BlkWidth, uint8_t value=1)
   {
-    SET_CB_BLK(x,y,log2BlkWidth, cu_transquant_bypass, value);
+    set_cb_blk(x,y,log2BlkWidth, [value](CB_ref_info& cb){ cb.cu_transquant_bypass = value; });
 
     // TODO: in the encoder, we somewhere have to clear this
     ctb_info.get(x,y).has_pcm_or_cu_transquant_bypass = true;
@@ -537,7 +536,7 @@ public:
     // But in corrupted streams, slices may overlap and set contradicting log2CbSizes.
     // We also need this for encoding.
     if (fill) {
-      SET_CB_BLK(x0,y0,log2CbSize, log2CbSize, 0);
+      set_cb_blk(x0,y0,log2CbSize, [](CB_ref_info& cb){ cb.log2CbSize = 0; });
     }
 
     cb_info.get(x0,y0).log2CbSize = log2CbSize;
@@ -545,28 +544,28 @@ public:
 
   int  get_log2CbSize(int x0, int y0) const
   {
-    return (enum PredMode)cb_info.get(x0,y0).log2CbSize;
+    return cb_info.get(x0,y0).log2CbSize;
   }
 
   // coordinates in CB units
   int  get_log2CbSize_cbUnits(int xCb, int yCb) const
   {
-    return (enum PredMode)cb_info[ xCb + yCb*cb_info.width_in_units ].log2CbSize;
+    return cb_info[ xCb + yCb*cb_info.width_in_units ].log2CbSize;
   }
 
-  void set_PartMode(int x,int y, enum PartMode mode)
+  void set_PartMode(int x,int y, PartMode mode)
   {
     cb_info.get(x,y).PartMode = mode;
   }
 
-  enum PartMode get_PartMode(int x,int y) const
+  PartMode get_PartMode(int x,int y) const
   {
-    return (enum PartMode)cb_info.get(x,y).PartMode;
+    return (PartMode)cb_info.get(x,y).PartMode;
   }
 
   void set_ctDepth(int x,int y, int log2BlkWidth, int depth)
   {
-    SET_CB_BLK(x,y,log2BlkWidth, ctDepth, depth);
+    set_cb_blk(x,y,log2BlkWidth, [depth](CB_ref_info& cb){ cb.ctDepth = depth; });
   }
 
   int get_ctDepth(int x,int y) const
@@ -576,7 +575,7 @@ public:
 
   void set_QPY(int x,int y, int log2BlkWidth, int QP_Y)
   {
-    SET_CB_BLK (x, y, log2BlkWidth, QP_Y, QP_Y);
+    set_cb_blk(x,y,log2BlkWidth, [QP_Y](CB_ref_info& cb){ cb.QP_Y = QP_Y; });
   }
 
   int  get_QPY(int x0,int y0) const
@@ -593,7 +592,7 @@ public:
 
   void clear_split_transform_flags(int x0,int y0,int log2CbSize)
   {
-    CLEAR_TB_BLK (x0,y0, log2CbSize);
+    clear_tb_blk(x0,y0,log2CbSize);
   }
 
   int  get_split_transform_flag(int x0,int y0,int trafoDepth) const
@@ -622,7 +621,7 @@ public:
 
   // --- intraPredMode metadata access ---
 
-  enum IntraPredMode get_IntraPredMode(int x,int y) const
+  IntraPredMode get_IntraPredMode(int x,int y) const
   {
     uint8_t ipm = intraPredMode.get(x,y);
 
@@ -631,15 +630,17 @@ public:
       ipm = 0;
     }
 
-    return static_cast<enum IntraPredMode>(ipm);
+    return static_cast<IntraPredMode>(ipm);
   }
 
-  enum IntraPredMode get_IntraPredMode_atIndex(int idx) const
+  IntraPredMode get_IntraPredMode_atIndex(int idx) const
   {
-    return (enum IntraPredMode)intraPredMode[idx];
+    uint8_t ipm = intraPredMode[idx];
+    if (ipm > 34) { ipm = 0; }
+    return static_cast<IntraPredMode>(ipm);
   }
 
-  void set_IntraPredMode(int PUidx,int log2blkSize, enum IntraPredMode mode)
+  void set_IntraPredMode(int PUidx,int log2blkSize, IntraPredMode mode)
   {
     int pbSize = 1<<(log2blkSize - intraPredMode.log2unitSize);
 
@@ -649,7 +650,7 @@ public:
   }
 
   void set_IntraPredMode(int x0,int y0,int log2blkSize,
-                         enum IntraPredMode mode)
+                         IntraPredMode mode)
   {
     int pbSize = 1<<(log2blkSize - intraPredMode.log2unitSize);
     int PUidx  = (x0>>sps->Log2MinPUSize) + (y0>>sps->Log2MinPUSize)*sps->PicWidthInMinPUs;
@@ -666,9 +667,9 @@ public:
   }
 
 
-  enum IntraPredMode get_IntraPredModeC(int x,int y) const
+  IntraPredMode get_IntraPredModeC(int x,int y) const
   {
-    return (enum IntraPredMode)(intraPredModeC.get(x,y) & 0x3f);
+    return (IntraPredMode)(intraPredModeC.get(x,y) & 0x3f);
   }
 
   bool is_IntraPredModeC_Mode4(int x,int y) const
@@ -676,7 +677,7 @@ public:
     return intraPredModeC.get(x,y) & 0x80;
   }
 
-  void set_IntraPredModeC(int x0,int y0,int log2blkSize, enum IntraPredMode mode,
+  void set_IntraPredModeC(int x0,int y0,int log2blkSize, IntraPredMode mode,
                           bool is_mode4)
   {
     uint8_t combinedValue = mode;
@@ -697,19 +698,6 @@ public:
   }
 
 
-  /*
-  // NOTE: encoder only
-  void set_ChromaIntraPredMode(int x,int y,int log2BlkWidth, enum IntraChromaPredMode mode)
-  {
-    SET_CB_BLK (x, y, log2BlkWidth, intra_chroma_pred_mode, mode);
-  }
-
-  // NOTE: encoder only
-  enum IntraChromaPredMode get_ChromaIntraPredMode(int x,int y) const
-  {
-    return (enum IntraChromaPredMode)(cb_info.get(x,y).intra_chroma_pred_mode);
-  }
-  */
 
   // --- CTB metadata access ---
 
@@ -740,45 +728,45 @@ public:
     ctb_info.get(x,y).SliceHeaderIndex = SliceHeaderIndex;
   }
 
-  int  get_SliceHeaderIndex(int x, int y) const
+  uint16_t get_SliceHeaderIndex(int x, int y) const
   {
     return ctb_info.get(x,y).SliceHeaderIndex;
   }
 
-  int  get_SliceHeaderIndexCtb(int ctbX, int ctbY) const
+  uint16_t get_SliceHeaderIndexCtb(int ctbX, int ctbY) const
   {
     return ctb_info[ctbX + ctbY*ctb_info.width_in_units].SliceHeaderIndex;
   }
 
-  int  get_SliceHeaderIndex_atIndex(int ctb) const
+  uint16_t get_SliceHeaderIndex_atIndex(int ctb) const
   {
     return ctb_info[ctb].SliceHeaderIndex;
   }
 
   bool is_SliceHeader_available(int x,int y) const
   {
-    int idx = ctb_info.get(x,y).SliceHeaderIndex;
-    return idx >= 0 && idx < slices.size();
+    uint16_t idx = ctb_info.get(x,y).SliceHeaderIndex;
+    return idx < slices.size();
   }
 
   slice_segment_header* get_SliceHeader(int x, int y)
   {
-    int idx = get_SliceHeaderIndex(x,y);
-    if (idx >= slices.size()) { return NULL; }
+    uint16_t idx = get_SliceHeaderIndex(x,y);
+    if (idx >= slices.size()) { return nullptr; }
     return slices[idx];
   }
 
   slice_segment_header* get_SliceHeaderCtb(int ctbX, int ctbY)
   {
-    int idx = get_SliceHeaderIndexCtb(ctbX,ctbY);
-    if (idx >= slices.size()) { return NULL; }
+    uint16_t idx = get_SliceHeaderIndexCtb(ctbX,ctbY);
+    if (idx >= slices.size()) { return nullptr; }
     return slices[idx];
   }
 
   const slice_segment_header* get_SliceHeaderCtb(int ctbX, int ctbY) const
   {
-    int idx = get_SliceHeaderIndexCtb(ctbX,ctbY);
-    if (idx >= slices.size()) { return NULL; }
+    uint16_t idx = get_SliceHeaderIndexCtb(ctbX,ctbY);
+    if (idx >= slices.size()) { return nullptr; }
     return slices[idx];
   }
 

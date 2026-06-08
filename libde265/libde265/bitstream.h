@@ -21,40 +21,42 @@
 #ifndef DE265_BITSTREAM_H
 #define DE265_BITSTREAM_H
 
-#ifdef HAVE_CONFIG_H
-#include <config.h>
-#endif
-
-#include <stdio.h>
-#include <stdint.h>
+#include <cstdint>
 
 
-#define MAX_UVLC_LEADING_ZEROS 20
-#define UVLC_ERROR -99999
+// HEVC (ITU-T H.265, E.3.3) allows ue(v) values up to 2^32-2 (e.g. bit_rate_value_minus1),
+// which requires 31 leading zeros in the exp-Golomb code. 32 leading zeros would give a
+// minimum codeNum of 2^32-1, which exceeds every syntax element's valid range.
+constexpr int MAX_UVLC_LEADING_ZEROS = 31;
+constexpr uint32_t UVLC_ERROR = UINT32_MAX;
+constexpr int32_t SVLC_ERROR = INT32_MIN;
 
 
-typedef struct {
-  uint8_t* data;
-  int bytes_remaining;
+class bitreader {
+public:
+  bitreader() = default;
+  bitreader(unsigned char* buffer, int len);
 
-  uint64_t nextbits; // left-aligned bits
-  int nextbits_cnt;
-} bitreader;
+  uint32_t get_bits(int n); // n in [0;32]
+  uint32_t get_bits_fast(int n); // n in [0;32]
+  uint32_t peek_bits(int n);
+  void skip_bits(int n);
+  void skip_bits_fast(int n);
+  void skip_to_byte_boundary();
+  void prepare_for_CABAC();
+  uint32_t get_uvlc();  // may return UVLC_ERROR
+  int32_t  get_svlc();  // may return SVLC_ERROR
 
-void bitreader_init(bitreader*, unsigned char* buffer, int len);
-void bitreader_refill(bitreader*); // refill to at least 56+1 bits
-int  next_bit(bitreader*);
-int  next_bit_norefill(bitreader*);
-int  get_bits(bitreader*, int n);
-int  get_bits_fast(bitreader*, int n);
-int  peek_bits(bitreader*, int n);
-void skip_bits(bitreader*, int n);
-void skip_bits_fast(bitreader*, int n);
-void skip_to_byte_boundary(bitreader*);
-void prepare_for_CABAC(bitreader*);
-int  get_uvlc(bitreader*);  // may return UVLC_ERROR
-int  get_svlc(bitreader*);  // may return UVLC_ERROR
+  bool check_rbsp_trailing_bits(); // return true if remaining filler bits are all zero
 
-bool check_rbsp_trailing_bits(bitreader*); // return true if remaining filler bits are all zero
+  uint8_t* data = nullptr;
+  int bytes_remaining = 0;
+
+private:
+  void refill(); // refill to at least 56+1 bits
+
+  uint64_t nextbits = 0; // left-aligned bits
+  int nextbits_cnt = 0;
+};
 
 #endif

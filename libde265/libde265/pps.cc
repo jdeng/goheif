@@ -25,6 +25,9 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <mutex>
+#include <memory>
+#include <atomic>
 #if defined(_MSC_VER) || defined(__MINGW32__)
 # include <malloc.h>
 #elif defined(HAVE_ALLOCA_H)
@@ -48,39 +51,39 @@ bool pps_range_extension::read(bitreader* br, decoder_context* ctx, const pic_pa
 {
   const seq_parameter_set* sps = ctx->get_sps(pps->seq_parameter_set_id);
 
-  int uvlc;
+  uint32_t uvlc;
 
   if (pps->transform_skip_enabled_flag) {
-    uvlc = get_uvlc(br);
+    uvlc = br->get_uvlc();
     if (uvlc == UVLC_ERROR ||
-        uvlc+2 > sps->Log2MaxTrafoSize) {
-
-      // Note: this is out of spec, but the conformance stream
-      // PERSIST_RPARAM_A_RExt_Sony_2 codes a too large value.
-
-      //ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
-      //return false;
+        uvlc > static_cast<uint32_t>(sps->Log2MaxTrafoSize) - 2) {
+      ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+      return false;
     }
 
     log2_max_transform_skip_block_size = uvlc+2;
   }
 
-  cross_component_prediction_enabled_flag = get_bits(br,1);
+  cross_component_prediction_enabled_flag = br->get_bits(1);
+  // shall be 0 when ChromaArrayType is not 3 (Sec. 7.4.3.3.2)
   if (sps->ChromaArrayType != CHROMA_444 &&
       cross_component_prediction_enabled_flag) {
       ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+      return false;
   }
 
-  chroma_qp_offset_list_enabled_flag = get_bits(br,1);
+  chroma_qp_offset_list_enabled_flag = br->get_bits(1);
+  // shall be 0 when ChromaArrayType is 0 (mono) (Sec. 7.4.3.3.2)
   if (sps->ChromaArrayType == CHROMA_MONO &&
       chroma_qp_offset_list_enabled_flag) {
       ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+      return false;
   }
 
   if (chroma_qp_offset_list_enabled_flag) {
-    uvlc = get_uvlc(br);
+    uvlc = br->get_uvlc();
     if (uvlc == UVLC_ERROR ||
-        uvlc > sps->log2_diff_max_min_luma_coding_block_size) {
+        uvlc > static_cast<uint32_t>(sps->log2_diff_max_min_luma_coding_block_size)) {
       ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
       return false;
     }
@@ -88,7 +91,7 @@ bool pps_range_extension::read(bitreader* br, decoder_context* ctx, const pic_pa
     diff_cu_chroma_qp_offset_depth = uvlc;
 
 
-    uvlc = get_uvlc(br);
+    uvlc = br->get_uvlc();
     if (uvlc == UVLC_ERROR ||
         uvlc > 5) {
       ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
@@ -98,9 +101,9 @@ bool pps_range_extension::read(bitreader* br, decoder_context* ctx, const pic_pa
     chroma_qp_offset_list_len = uvlc+1;
 
     for (int i=0;i<chroma_qp_offset_list_len;i++) {
-      int svlc;
-      svlc = get_svlc(br);
-      if (svlc == UVLC_ERROR ||
+      int32_t svlc;
+      svlc = br->get_svlc();
+      if (svlc == SVLC_ERROR ||
           svlc < -12 || svlc > 12) {
         ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
         return false;
@@ -108,8 +111,8 @@ bool pps_range_extension::read(bitreader* br, decoder_context* ctx, const pic_pa
 
       cb_qp_offset_list[i] = svlc;
 
-      svlc = get_svlc(br);
-      if (svlc == UVLC_ERROR ||
+      svlc = br->get_svlc();
+      if (svlc == SVLC_ERROR ||
           svlc < -12 || svlc > 12) {
         ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
         return false;
@@ -120,18 +123,18 @@ bool pps_range_extension::read(bitreader* br, decoder_context* ctx, const pic_pa
   }
 
 
-  uvlc = get_uvlc(br);
+  uvlc = br->get_uvlc();
   if (uvlc == UVLC_ERROR ||
-      uvlc > libde265_max(0, sps->BitDepth_Y-10)) {
+      uvlc > static_cast<uint32_t>(std::max(0, sps->BitDepth_Y-10))) {
     ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
     return false;
   }
 
   log2_sao_offset_scale_luma = uvlc;
 
-  uvlc = get_uvlc(br);
+  uvlc = br->get_uvlc();
   if (uvlc == UVLC_ERROR ||
-      uvlc > libde265_max(0, sps->BitDepth_C-10)) {
+      uvlc > static_cast<uint32_t>(std::max(0, sps->BitDepth_C-10))) {
     ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
     return false;
   }
@@ -191,7 +194,7 @@ pic_parameter_set::~pic_parameter_set()
 void pic_parameter_set::set_defaults(enum PresetSet)
 {
   pps_read = false;
-  sps = NULL;
+  sps = nullptr;
 
   pic_parameter_set_id = 0;
   seq_parameter_set_id = 0;
@@ -235,11 +238,7 @@ void pic_parameter_set::set_defaults(enum PresetSet)
   for (int i=0;i<=DE265_MAX_TILE_COLUMNS;i++) { colBd[i]=0; }
   for (int i=0;i<=DE265_MAX_TILE_ROWS;i++)    { rowBd[i]=0; }
 
-  CtbAddrRStoTS.clear();
-  CtbAddrTStoRS.clear();
-  TileId.clear();
-  TileIdRS.clear();
-  MinTbAddrZS.clear();
+  scan.reset();
 
 
   Log2MinCuQpDeltaSize = 0;
@@ -264,6 +263,8 @@ void pic_parameter_set::set_defaults(enum PresetSet)
   pps_range_extension_flag = 0;
   pps_multilayer_extension_flag = 0;
   pps_extension_6bits = 0;
+
+  range_extension.reset();
 }
 
 
@@ -272,39 +273,39 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
   reset();
 
 
-  int uvlc;
-  pic_parameter_set_id = uvlc = get_uvlc(br);
-  if (uvlc >= DE265_MAX_PPS_SETS ||
-      uvlc == UVLC_ERROR) {
+  uint32_t uvlc;
+  uvlc = br->get_uvlc();
+  if (uvlc == UVLC_ERROR || uvlc >= DE265_MAX_PPS_SETS) {
     ctx->add_warning(DE265_WARNING_NONEXISTING_PPS_REFERENCED, false);
     return false;
   }
+  pic_parameter_set_id = uvlc;
 
-  seq_parameter_set_id = uvlc = get_uvlc(br);
-  if (uvlc >= DE265_MAX_SPS_SETS ||
-      uvlc == UVLC_ERROR) {
+  uvlc = br->get_uvlc();
+  if (uvlc == UVLC_ERROR || uvlc >= DE265_MAX_SPS_SETS) {
     ctx->add_warning(DE265_WARNING_NONEXISTING_SPS_REFERENCED, false);
     return false;
   }
+  seq_parameter_set_id = uvlc;
 
-  dependent_slice_segments_enabled_flag = get_bits(br,1);
-  output_flag_present_flag = get_bits(br,1);
-  num_extra_slice_header_bits = get_bits(br,3);
-  sign_data_hiding_flag = get_bits(br,1);
-  cabac_init_present_flag = get_bits(br,1);
-  num_ref_idx_l0_default_active = uvlc = get_uvlc(br);
-  if (uvlc == UVLC_ERROR) {
+  dependent_slice_segments_enabled_flag = br->get_bits(1);
+  output_flag_present_flag = br->get_bits(1);
+  num_extra_slice_header_bits = br->get_bits(3);
+  sign_data_hiding_flag = br->get_bits(1);
+  cabac_init_present_flag = br->get_bits(1);
+  uvlc = br->get_uvlc();
+  if (uvlc == UVLC_ERROR || uvlc > 15) {
     ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
     return false;
   }
-  num_ref_idx_l0_default_active++;
+  num_ref_idx_l0_default_active = uvlc + 1;
 
-  num_ref_idx_l1_default_active = uvlc = get_uvlc(br);
-  if (uvlc == UVLC_ERROR) {
+  uvlc = br->get_uvlc();
+  if (uvlc == UVLC_ERROR || uvlc > 15) {
     ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
     return false;
   }
-  num_ref_idx_l1_default_active++;
+  num_ref_idx_l1_default_active = uvlc + 1;
 
 
   if (!ctx->has_sps(seq_parameter_set_id)) {
@@ -314,106 +315,113 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
 
   sps = ctx->get_shared_sps(seq_parameter_set_id);
 
-  if ((pic_init_qp = get_svlc(br)) == UVLC_ERROR) {
-    ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
-    return false;
-  }
-  pic_init_qp += 26;
-
-  constrained_intra_pred_flag = get_bits(br,1);
-  transform_skip_enabled_flag = get_bits(br,1);
-  cu_qp_delta_enabled_flag = get_bits(br,1);
-
-  if (cu_qp_delta_enabled_flag) {
-    if ((diff_cu_qp_delta_depth = get_uvlc(br)) == UVLC_ERROR) {
+  {
+    int32_t svlc;
+    // init_qp_minus26 shall be in [-(26 + QpBdOffset_Y), +25] (Sec. 7.4.3.3.1)
+    if ((svlc = br->get_svlc()) == SVLC_ERROR ||
+        svlc < -(26 + sps->QpBdOffset_Y) || svlc > 25) {
       ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
       return false;
     }
+    pic_init_qp = svlc + 26;
+  }
+
+  constrained_intra_pred_flag = br->get_bits(1);
+  transform_skip_enabled_flag = br->get_bits(1);
+  cu_qp_delta_enabled_flag = br->get_bits(1);
+
+  if (cu_qp_delta_enabled_flag) {
+    // diff_cu_qp_delta_depth shall be in [0, log2_diff_max_min_luma_coding_block_size] (Sec. 7.4.3.3.1)
+    if ((uvlc = br->get_uvlc()) == UVLC_ERROR ||
+        uvlc > sps->log2_diff_max_min_luma_coding_block_size) {
+      ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+      return false;
+    }
+    diff_cu_qp_delta_depth = uvlc;
   } else {
     diff_cu_qp_delta_depth = 0;
   }
 
-  if ((pic_cb_qp_offset = get_svlc(br)) == UVLC_ERROR) {
-    ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
-    return false;
+  {
+    int32_t svlc;
+    if ((svlc = br->get_svlc()) == SVLC_ERROR) {
+      ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+      return false;
+    }
+    pic_cb_qp_offset = svlc;
   }
 
-  if ((pic_cr_qp_offset = get_svlc(br)) == UVLC_ERROR) {
-    ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
-    return false;
+  {
+    int32_t svlc;
+    if ((svlc = br->get_svlc()) == SVLC_ERROR) {
+      ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+      return false;
+    }
+    pic_cr_qp_offset = svlc;
   }
 
-  pps_slice_chroma_qp_offsets_present_flag = get_bits(br,1);
-  weighted_pred_flag = get_bits(br,1);
-  weighted_bipred_flag = get_bits(br,1);
-  transquant_bypass_enable_flag = get_bits(br,1);
-  tiles_enabled_flag = get_bits(br,1);
-  entropy_coding_sync_enabled_flag = get_bits(br,1);
+  pps_slice_chroma_qp_offsets_present_flag = br->get_bits(1);
+  weighted_pred_flag = br->get_bits(1);
+  weighted_bipred_flag = br->get_bits(1);
+  transquant_bypass_enable_flag = br->get_bits(1);
+  tiles_enabled_flag = br->get_bits(1);
+  entropy_coding_sync_enabled_flag = br->get_bits(1);
 
 
   // --- tiles ---
 
   if (tiles_enabled_flag) {
-    num_tile_columns = get_uvlc(br);
-    if (num_tile_columns == UVLC_ERROR ||
-	num_tile_columns+1 > DE265_MAX_TILE_COLUMNS) {
+    if ((uvlc = br->get_uvlc()) == UVLC_ERROR ||
+        uvlc + 1 > DE265_MAX_TILE_COLUMNS ||
+        uvlc + 1 > sps->PicWidthInCtbsY) {
       ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
       return false;
     }
-    num_tile_columns++;
+    num_tile_columns = uvlc + 1;
 
-    num_tile_rows = get_uvlc(br);
-    if (num_tile_rows == UVLC_ERROR ||
-	num_tile_rows+1 > DE265_MAX_TILE_ROWS) {
+    if ((uvlc = br->get_uvlc()) == UVLC_ERROR ||
+        uvlc + 1 > DE265_MAX_TILE_ROWS ||
+        uvlc + 1 > sps->PicHeightInCtbsY) {
       ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
       return false;
     }
-    num_tile_rows++;
+    num_tile_rows = uvlc + 1;
 
-    uniform_spacing_flag = get_bits(br,1);
+    uniform_spacing_flag = br->get_bits(1);
 
     if (uniform_spacing_flag==false) {
-      int lastColumnWidth = sps->PicWidthInCtbsY;
-      int lastRowHeight   = sps->PicHeightInCtbsY;
+      uint16_t lastColumnWidth = sps->PicWidthInCtbsY;
+      uint16_t lastRowHeight   = sps->PicHeightInCtbsY;
 
-      for (int i=0; i<num_tile_columns-1; i++)
-        {
-          colWidth[i] = get_uvlc(br);
-          if (colWidth[i] == UVLC_ERROR) {
-	    ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
-	    return false;
-	  }
-          colWidth[i]++;
-
-          lastColumnWidth -= colWidth[i];
+      for (int i = 0; i < num_tile_columns - 1; i++) {
+        if ((uvlc = br->get_uvlc()) == UVLC_ERROR ||
+            uvlc + 1 >= lastColumnWidth) {
+          ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+          return false;
         }
 
-      if (lastColumnWidth <= 0) {
-        return false;
+        colWidth[i] = uvlc + 1;
+
+        lastColumnWidth -= colWidth[i];
       }
 
-      colWidth[num_tile_columns-1] = lastColumnWidth;
+      colWidth[num_tile_columns - 1] = lastColumnWidth;
 
-      for (int i=0; i<num_tile_rows-1; i++)
-        {
-          rowHeight[i] = get_uvlc(br);
-          if (rowHeight[i] == UVLC_ERROR) {
-	    ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
-	    return false;
-	  }
-          rowHeight[i]++;
-          lastRowHeight -= rowHeight[i];
+      for (int i = 0; i < num_tile_rows - 1; i++) {
+        if ((uvlc = br->get_uvlc()) == UVLC_ERROR ||
+            uvlc + 1 >= lastRowHeight) {
+          ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+          return false;
         }
-
-      if (lastRowHeight <= 0) {
-        return false;
+        rowHeight[i] = uvlc + 1;
+        lastRowHeight -= rowHeight[i];
       }
 
 
       rowHeight[num_tile_rows-1] = lastRowHeight;
     }
 
-    loop_filter_across_tiles_enabled_flag = get_bits(br,1);
+    loop_filter_across_tiles_enabled_flag = br->get_bits(1);
 
   } else {
     num_tile_columns = 1;
@@ -431,25 +439,28 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
   beta_offset = 0; // default value
   tc_offset   = 0; // default value
 
-  pps_loop_filter_across_slices_enabled_flag = get_bits(br,1);
-  deblocking_filter_control_present_flag = get_bits(br,1);
+  pps_loop_filter_across_slices_enabled_flag = br->get_bits(1);
+  deblocking_filter_control_present_flag = br->get_bits(1);
   if (deblocking_filter_control_present_flag) {
-    deblocking_filter_override_enabled_flag = get_bits(br,1);
-    pic_disable_deblocking_filter_flag = get_bits(br,1);
+    deblocking_filter_override_enabled_flag = br->get_bits(1);
+    pic_disable_deblocking_filter_flag = br->get_bits(1);
     if (!pic_disable_deblocking_filter_flag) {
-      beta_offset = get_svlc(br);
-      if (beta_offset == UVLC_ERROR) {
-	ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
-	return false;
-      }
-      beta_offset *= 2;
+      {
+        int32_t svlc;
+        // pps_beta_offset_div2 shall be in [-6, 6] (Sec. 7.4.3.3.1)
+        if ((svlc = br->get_svlc()) == SVLC_ERROR || svlc < -6 || svlc > 6) {
+	  ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+	  return false;
+        }
+        beta_offset = svlc * 2;
 
-      tc_offset   = get_svlc(br);
-      if (tc_offset == UVLC_ERROR) {
-	ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
-	return false;
+        // pps_tc_offset_div2 shall be in [-6, 6] (Sec. 7.4.3.3.1)
+        if ((svlc = br->get_svlc()) == SVLC_ERROR || svlc < -6 || svlc > 6) {
+	  ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
+	  return false;
+        }
+        tc_offset = svlc * 2;
       }
-      tc_offset   *= 2;
     }
   }
   else {
@@ -460,7 +471,7 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
 
   // --- scaling list ---
 
-  pic_scaling_list_data_present_flag = get_bits(br,1);
+  pic_scaling_list_data_present_flag = br->get_bits(1);
 
   // check consistency: if scaling-lists are not enabled, pic_scalign_list_data_present_flag
   // must be FALSE
@@ -478,32 +489,31 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
     }
   }
   else {
-    memcpy(&scaling_list, &sps->scaling_list, sizeof(scaling_list_data));
+    scaling_list = sps->scaling_list;
   }
 
 
 
 
-  lists_modification_present_flag = get_bits(br,1);
-  log2_parallel_merge_level = get_uvlc(br);
-  if (log2_parallel_merge_level == UVLC_ERROR) {
+  lists_modification_present_flag = br->get_bits(1);
+  if ((uvlc = br->get_uvlc()) == UVLC_ERROR || uvlc > 4) {
     ctx->add_warning(DE265_WARNING_PPS_HEADER_INVALID, false);
     return false;
   }
-  log2_parallel_merge_level += 2;
+  log2_parallel_merge_level = uvlc + 2;
 
   if (log2_parallel_merge_level-2 > sps->log2_min_luma_coding_block_size-3 +1 +
       sps->log2_diff_max_min_luma_coding_block_size) {
     return false;
   }
 
-  slice_segment_header_extension_present_flag = get_bits(br,1);
-  pps_extension_flag = get_bits(br,1);
+  slice_segment_header_extension_present_flag = br->get_bits(1);
+  pps_extension_flag = br->get_bits(1);
 
   if (pps_extension_flag) {
-    pps_range_extension_flag = get_bits(br,1);
-    pps_multilayer_extension_flag = get_bits(br,1);
-    pps_extension_6bits = get_bits(br,6);
+    pps_range_extension_flag = br->get_bits(1);
+    pps_multilayer_extension_flag = br->get_bits(1);
+    pps_extension_6bits = br->get_bits(6);
 
     if (pps_range_extension_flag) {
       bool success = range_extension.read(br, ctx, this);
@@ -512,16 +522,12 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
       }
     }
 
-    //assert(false);
-    /*
-      while( more_rbsp_data() )
-
-      pps_extension_data_flag
-      u(1)
-      rbsp_trailing_bits()
-
-      }
-    */
+    // Multilayer extension and the 6 reserved extension bits would carry
+    // additional payload that we do not parse. Reject the stream.
+    if (pps_multilayer_extension_flag || pps_extension_6bits) {
+      ctx->add_warning(DE265_ERROR_NOT_IMPLEMENTED_YET, false);
+      return false;
+    }
   }
 
 
@@ -530,6 +536,153 @@ bool pic_parameter_set::read(bitreader* br, decoder_context* ctx)
   pps_read = true;
 
   return true;
+}
+
+
+//----------------------------------------------------------------------------
+// Library-scope cache for the geometry-derived scan tables (HEVC Sec. 6.5).
+//
+// The tables depend only on the picture/tile geometry. Many independent decoder
+// contexts (e.g. libheif tile grids) decode images of the same geometry, so we
+// compute the tables once and share them read-only via shared_ptr. A small LRU
+// cache (a few distinct geometries) protected by a mutex serves concurrent
+// decoders. The compute is done while holding the lock on purpose: a burst of
+// contexts with the same new geometry then computes the tables exactly once
+// (the others block briefly and pick up the cached result).
+//----------------------------------------------------------------------------
+
+namespace {
+
+struct pps_scan_key {
+  uint8_t  log2CtbSize;
+  uint8_t  log2MinTrafo;
+  uint16_t picWidthInCtbs, picHeightInCtbs;
+  uint16_t picWidthInTbs,  picHeightInTbs;
+  uint32_t picSizeInCtbs,  picSizeInTbs;
+  uint16_t numTileCols,    numTileRows;
+  uint16_t colBd[DE265_MAX_TILE_COLUMNS+1];
+  uint16_t rowBd[DE265_MAX_TILE_ROWS+1];
+
+  bool operator==(const pps_scan_key& o) const {
+    if (log2CtbSize    != o.log2CtbSize    || log2MinTrafo   != o.log2MinTrafo   ||
+        picWidthInCtbs != o.picWidthInCtbs || picHeightInCtbs!= o.picHeightInCtbs||
+        picWidthInTbs  != o.picWidthInTbs  || picHeightInTbs != o.picHeightInTbs ||
+        picSizeInCtbs  != o.picSizeInCtbs  || picSizeInTbs   != o.picSizeInTbs   ||
+        numTileCols    != o.numTileCols    || numTileRows    != o.numTileRows) return false;
+    for (int i=0;i<=numTileCols;i++) if (colBd[i]!=o.colBd[i]) return false;
+    for (int i=0;i<=numTileRows;i++) if (rowBd[i]!=o.rowBd[i]) return false;
+    return true;
+  }
+};
+
+// Build the five scan tables from the geometry key (HEVC 6.5.1 + 6.5.2).
+std::shared_ptr<const pps_scan_tables> compute_scan_tables(const pps_scan_key& k)
+{
+  std::shared_ptr<pps_scan_tables> t = std::make_shared<pps_scan_tables>();
+  t->CtbAddrRStoTS.resize(k.picSizeInCtbs);
+  t->CtbAddrTStoRS.resize(k.picSizeInCtbs);
+  t->TileId       .resize(k.picSizeInCtbs);
+  t->TileIdRS     .resize(k.picSizeInCtbs);
+  t->MinTbAddrZS  .resize(k.picSizeInTbs);
+
+  // 6.5.1 raster (RS) <-> tile scan (TS) conversion + tile-ID assignment.
+  uint32_t ctbAddrTS = 0;
+  uint32_t tIdx = 0;
+  for (int tileY=0; tileY<k.numTileRows; tileY++) {
+    for (int tileX=0; tileX<k.numTileCols; tileX++) {
+      for (int y=k.rowBd[tileY]; y<k.rowBd[tileY+1]; y++) {
+        for (int x=k.colBd[tileX]; x<k.colBd[tileX+1]; x++) {
+          uint32_t ctbAddrRS = y * k.picWidthInCtbs + x;
+          t->CtbAddrRStoTS[ctbAddrRS] = ctbAddrTS;
+          t->CtbAddrTStoRS[ctbAddrTS] = ctbAddrRS;
+          t->TileId  [ctbAddrTS] = tIdx;
+          t->TileIdRS[ctbAddrRS] = tIdx;
+          ctbAddrTS++;
+        }
+      }
+      tIdx++;
+    }
+  }
+  assert(ctbAddrTS == k.picSizeInCtbs);
+
+  // 6.5.2 Z-scan order array initialization process.
+  const int shift = k.log2CtbSize - k.log2MinTrafo;
+  for (int y=0; y<k.picHeightInTbs; y++)
+    for (int x=0; x<k.picWidthInTbs; x++) {
+      int tbX = (x<<k.log2MinTrafo)>>k.log2CtbSize;
+      int tbY = (y<<k.log2MinTrafo)>>k.log2CtbSize;
+      int ctbAddrRS = k.picWidthInCtbs*tbY + tbX;
+
+      uint32_t v = t->CtbAddrRStoTS[ctbAddrRS] << (shift*2);
+      int p=0;
+      for (int i=0;i<shift;i++) {
+        int m=1<<i;
+        p += (m & x ? m*m : 0) + (m & y ? 2*m*m : 0);
+      }
+      t->MinTbAddrZS[x + y*k.picWidthInTbs] = v + p;
+    }
+
+  return t;
+}
+
+class pps_scan_cache {
+public:
+  std::shared_ptr<const pps_scan_tables> get(const pps_scan_key& key) {
+    std::lock_guard<std::mutex> lock(mMutex);
+
+    for (size_t i=0; i<mEntries.size(); i++) {
+      if (mEntries[i].key == key) {
+        std::shared_ptr<const pps_scan_tables> tables = mEntries[i].tables;
+        if (i != 0) {  // move-to-front (LRU)
+          Entry e = mEntries[i];
+          mEntries.erase(mEntries.begin()+i);
+          mEntries.insert(mEntries.begin(), e);
+        }
+        return tables;
+      }
+    }
+
+    // Miss: compute while holding the lock so that a burst of concurrent decoders
+    // with the same new geometry computes the tables exactly once.
+    std::shared_ptr<const pps_scan_tables> tables = compute_scan_tables(key);
+    mEntries.insert(mEntries.begin(), Entry{key, tables});
+    if (mEntries.size() > kMaxEntries) mEntries.pop_back();  // evict LRU
+    return tables;
+  }
+
+private:
+  static const size_t kMaxEntries = 3;
+  struct Entry { pps_scan_key key; std::shared_ptr<const pps_scan_tables> tables; };
+  std::mutex mMutex;
+  std::vector<Entry> mEntries;
+};
+
+// Owned by the de265_init()/de265_free() lifecycle (see de265.cc). It is created
+// and destroyed (under de265's init mutex) while no decoder is running, so it is
+// read locklessly during decoding; the cache's own mutex guards concurrent get()
+// calls. Atomic so the publish/read of the pointer is well-defined.
+std::atomic<pps_scan_cache*> g_pps_scan_cache{nullptr};
+
+std::shared_ptr<const pps_scan_tables> get_pps_scan_tables(const pps_scan_key& key)
+{
+  pps_scan_cache* cache = g_pps_scan_cache.load(std::memory_order_acquire);
+  if (cache) return cache->get(key);
+  return compute_scan_tables(key);  // library not initialized: compute without caching
+}
+
+} // namespace
+
+
+void pps_scan_cache_init()
+{
+  if (!g_pps_scan_cache.load(std::memory_order_relaxed)) {
+    g_pps_scan_cache.store(new pps_scan_cache(), std::memory_order_release);
+  }
+}
+
+void pps_scan_cache_free()
+{
+  delete g_pps_scan_cache.exchange(nullptr, std::memory_order_acq_rel);
 }
 
 
@@ -544,7 +697,7 @@ void pic_parameter_set::set_derived_values(const seq_parameter_set* sps)
 
     // set columns widths
 
-    int *const colPos = (int *)alloca((num_tile_columns+1) * sizeof(int));
+    int *const colPos = static_cast<int*>(alloca((num_tile_columns+1) * sizeof(int)));
 
     for (int i=0;i<=num_tile_columns;i++) {
       colPos[i] = i*sps->PicWidthInCtbsY / num_tile_columns;
@@ -555,7 +708,7 @@ void pic_parameter_set::set_derived_values(const seq_parameter_set* sps)
 
     // set row heights
 
-    int *const rowPos = (int *)alloca((num_tile_rows+1) * sizeof(int));
+    int *const rowPos = static_cast<int*>(alloca((num_tile_rows+1) * sizeof(int)));
 
     for (int i=0;i<=num_tile_rows;i++) {
       rowPos[i] = i*sps->PicHeightInCtbsY / num_tile_rows;
@@ -580,143 +733,28 @@ void pic_parameter_set::set_derived_values(const seq_parameter_set* sps)
 
 
 
-  // alloc raster scan arrays
+  // The derived scan tables (Sec. 6.5.1 + 6.5.2) depend only on the picture/tile
+  // geometry computed above. Build the geometry key and fetch the shared tables
+  // from the library-scope cache (computing+caching them on a miss). This avoids
+  // recomputing the (potentially large) MinTbAddrZS table for every decoder
+  // context when many contexts decode images of the same geometry.
 
-  CtbAddrRStoTS.resize(sps->PicSizeInCtbsY);
-  CtbAddrTStoRS.resize(sps->PicSizeInCtbsY);
-  TileId       .resize(sps->PicSizeInCtbsY);
-  TileIdRS     .resize(sps->PicSizeInCtbsY);
-  MinTbAddrZS  .resize(sps->PicSizeInTbsY );
+  pps_scan_key key;
+  memset(&key, 0, sizeof(key));   // zero padding/unused tile entries for clean compares
+  key.log2CtbSize     = sps->Log2CtbSizeY;
+  key.log2MinTrafo    = sps->Log2MinTrafoSize;
+  key.picWidthInCtbs  = sps->PicWidthInCtbsY;
+  key.picHeightInCtbs = sps->PicHeightInCtbsY;
+  key.picWidthInTbs   = sps->PicWidthInTbsY;
+  key.picHeightInTbs  = sps->PicHeightInTbsY;
+  key.picSizeInCtbs   = sps->PicSizeInCtbsY;
+  key.picSizeInTbs    = sps->PicSizeInTbsY;
+  key.numTileCols     = num_tile_columns;
+  key.numTileRows     = num_tile_rows;
+  for (int i=0;i<=num_tile_columns;i++) key.colBd[i] = colBd[i];
+  for (int i=0;i<=num_tile_rows;   i++) key.rowBd[i] = rowBd[i];
 
-
-  // raster scan (RS) <-> tile scan (TS) conversion
-
-  for (int ctbAddrRS=0 ; ctbAddrRS < sps->PicSizeInCtbsY ; ctbAddrRS++)
-    {
-      int tbX = ctbAddrRS % sps->PicWidthInCtbsY;
-      int tbY = ctbAddrRS / sps->PicWidthInCtbsY;
-      int tileX=-1,tileY=-1;
-
-      for (int i=0;i<num_tile_columns;i++)
-        if (tbX >= colBd[i])
-          tileX=i;
-
-      for (int j=0;j<num_tile_rows;j++)
-        if (tbY >= rowBd[j])
-          tileY=j;
-
-      CtbAddrRStoTS[ctbAddrRS] = 0;
-      for (int i=0;i<tileX;i++)
-        CtbAddrRStoTS[ctbAddrRS] += rowHeight[tileY]*colWidth[i];
-
-      for (int j=0;j<tileY;j++)
-        {
-          //pps->CtbAddrRStoTS[ctbAddrRS] += (tbY - pps->rowBd[tileY])*pps->colWidth[tileX];
-          //pps->CtbAddrRStoTS[ctbAddrRS] += tbX - pps->colBd[tileX];
-
-          CtbAddrRStoTS[ctbAddrRS] += sps->PicWidthInCtbsY * rowHeight[j];
-        }
-
-      assert(tileX>=0 && tileY>=0);
-
-      CtbAddrRStoTS[ctbAddrRS] += (tbY-rowBd[tileY])*colWidth[tileX];
-      CtbAddrRStoTS[ctbAddrRS] +=  tbX - colBd[tileX];
-
-
-      // inverse mapping
-
-      CtbAddrTStoRS[ CtbAddrRStoTS[ctbAddrRS] ] = ctbAddrRS;
-    }
-
-
-#if 0
-  logtrace(LogHeaders,"6.5.1 CtbAddrRSToTS\n");
-  for (int y=0;y<sps->PicHeightInCtbsY;y++)
-    {
-      for (int x=0;x<sps->PicWidthInCtbsY;x++)
-        {
-          logtrace(LogHeaders,"%3d ", CtbAddrRStoTS[x + y*sps->PicWidthInCtbsY]);
-        }
-
-      logtrace(LogHeaders,"\n");
-    }
-#endif
-
-  // tile id
-
-  for (int j=0, tIdx=0 ; j<num_tile_rows ; j++)
-    for (int i=0 ; i<num_tile_columns;i++)
-      {
-        for (int y=rowBd[j] ; y<rowBd[j+1] ; y++)
-          for (int x=colBd[i] ; x<colBd[i+1] ; x++) {
-            TileId  [ CtbAddrRStoTS[y*sps->PicWidthInCtbsY + x] ] = tIdx;
-            TileIdRS[ y*sps->PicWidthInCtbsY + x ] = tIdx;
-
-            //logtrace(LogHeaders,"tileID[%d,%d] = %d\n",x,y,pps->TileIdRS[ y*sps->PicWidthInCtbsY + x ]);
-          }
-
-        tIdx++;
-      }
-
-#if 0
-  logtrace(LogHeaders,"Tile IDs RS:\n");
-  for (int y=0;y<sps->PicHeightInCtbsY;y++) {
-    for (int x=0;x<sps->PicWidthInCtbsY;x++) {
-      logtrace(LogHeaders,"%2d ",TileIdRS[y*sps->PicWidthInCtbsY+x]);
-    }
-    logtrace(LogHeaders,"\n");
-  }
-#endif
-
-  // 6.5.2 Z-scan order array initialization process
-
-  for (int y=0;y<sps->PicHeightInTbsY;y++)
-    for (int x=0;x<sps->PicWidthInTbsY;x++)
-      {
-        int tbX = (x<<sps->Log2MinTrafoSize)>>sps->Log2CtbSizeY;
-        int tbY = (y<<sps->Log2MinTrafoSize)>>sps->Log2CtbSizeY;
-        int ctbAddrRS = sps->PicWidthInCtbsY*tbY + tbX;
-
-        MinTbAddrZS[x + y*sps->PicWidthInTbsY] = CtbAddrRStoTS[ctbAddrRS]
-          << ((sps->Log2CtbSizeY-sps->Log2MinTrafoSize)*2);
-
-        int p=0;
-        for (int i=0 ; i<(sps->Log2CtbSizeY - sps->Log2MinTrafoSize) ; i++) {
-          int m=1<<i;
-          p += (m & x ? m*m : 0) + (m & y ? 2*m*m : 0);
-        }
-
-        MinTbAddrZS[x + y*sps->PicWidthInTbsY] += p;
-      }
-
-
-  // --- debug logging ---
-
-  /*
-    logtrace(LogHeaders,"6.5.2 Z-scan order array\n");
-    for (int y=0;y<sps->PicHeightInTbsY;y++)
-    {
-    for (int x=0;x<sps->PicWidthInTbsY;x++)
-    {
-    logtrace(LogHeaders,"%4d ", pps->MinTbAddrZS[x + y*sps->PicWidthInTbsY]);
-    }
-
-    logtrace(LogHeaders,"\n");
-    }
-
-    for (int i=0;i<sps->PicSizeInTbsY;i++)
-    {
-    for (int y=0;y<sps->PicHeightInTbsY;y++)
-    {
-    for (int x=0;x<sps->PicWidthInTbsY;x++)
-    {
-    if (pps->MinTbAddrZS[x + y*sps->PicWidthInTbsY] == i) {
-    logtrace(LogHeaders,"%d %d\n",x,y);
-    }
-    }
-    }
-    }
-  */
+  scan = get_pps_scan_tables(key);
 }
 
 
@@ -729,7 +767,7 @@ bool pic_parameter_set::write(error_queue* errqueue, CABAC_encoder& out,
   }
   out.write_uvlc(pic_parameter_set_id);
 
-  if (seq_parameter_set_id >= DE265_MAX_PPS_SETS) {
+  if (seq_parameter_set_id >= DE265_MAX_SPS_SETS) {
     errqueue->add_warning(DE265_WARNING_NONEXISTING_SPS_REFERENCED, false);
     return false;
   }
