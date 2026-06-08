@@ -21,6 +21,8 @@
 #include "fallback.h"
 #include "fallback-motion.h"
 #include "fallback-dct.h"
+#include "fallback-intrapred.h"
+#include "fallback-deblk.h"
 
 
 void init_acceleration_functions_fallback(struct acceleration_functions* accel)
@@ -104,6 +106,7 @@ void init_acceleration_functions_fallback(struct acceleration_functions* accel)
   accel->rotate_coefficients = rotate_coefficients_fallback;
   accel->add_residual_8  = add_residual_fallback<uint8_t>;
   accel->add_residual_16 = add_residual_fallback<uint16_t>;
+  accel->dequant_coeff_block = dequant_coeff_block_fallback;
   accel->rdpcm_h = rdpcm_h_fallback;
   accel->rdpcm_v = rdpcm_v_fallback;
   accel->transform_skip_residual = transform_skip_residual_fallback;
@@ -124,4 +127,14 @@ void init_acceleration_functions_fallback(struct acceleration_functions* accel)
   accel->hadamard_transform_8[1] = hadamard_8x8_8_fallback;
   accel->hadamard_transform_8[2] = hadamard_16x16_8_fallback;
   accel->hadamard_transform_8[3] = hadamard_32x32_8_fallback;
+
+  accel->intra_pred_dc_8  = intra_pred_dc_fallback<uint8_t>;
+  accel->intra_pred_dc_16 = intra_pred_dc_fallback<uint16_t>;
+  accel->intra_pred_planar_8  = intra_pred_planar_fallback<uint8_t>;
+  accel->intra_pred_planar_16 = intra_pred_planar_fallback<uint16_t>;
+  accel->intra_pred_angular_8  = intra_pred_angular_fallback<uint8_t>;
+  accel->intra_pred_angular_16 = intra_pred_angular_fallback<uint16_t>;
+
+  accel->deblock_luma_8   = deblock_luma_8_fallback;
+  accel->deblock_chroma_8 = deblock_chroma_8_fallback;
 }

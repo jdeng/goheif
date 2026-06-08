@@ -2114,7 +2114,7 @@ void ff_hevc_transform_16x16_add_8_sse4(uint8_t *_dst, const int16_t *coeffs,
 
 
                 r4 = _mm_unpackhi_epi64(m128Tmp0, m128Tmp1);    //1st half 2nd row
-                r6 = _mm_unpackhi_epi64(m128Tmp2, m128Tmp3);    //2nd hald 2nd row
+                r6 = _mm_unpackhi_epi64(m128Tmp2, m128Tmp3);    //2nd half 2nd row
 
                 m128Tmp0 = _mm_unpackhi_epi32(E0l, E1l);
                 m128Tmp1 = _mm_unpackhi_epi32(E2l, E3l);
@@ -2909,6 +2909,13 @@ void ff_hevc_transform_16x16_add_10_sse4(uint8_t *_dst, const int16_t *coeffs,
 
 
 #if HAVE_SSE4_1
+// All m128iS0..m128iS31 are unconditionally loaded at function entry before any
+// use, but GCC's path analysis gives up inside this very large inlined function
+// and emits spurious -Wmaybe-uninitialized warnings for them. Suppress them here.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
 void ff_hevc_transform_32x32_add_8_sse4(uint8_t *_dst, const int16_t *coeffs,
         ptrdiff_t _stride) {
     uint8_t shift_2nd = 12; // 20 - Bit depth
@@ -4924,7 +4931,7 @@ void ff_hevc_transform_32x32_add_8_sse4(uint8_t *_dst, const int16_t *coeffs,
                 m128iS14= _mm_unpackhi_epi64(m128Tmp4,m128Tmp5); //third quarter
                 m128iS15= _mm_unpackhi_epi64(m128Tmp6,m128Tmp7); //last quarter
 
-                //fith row
+                //fifth row
 
                 m128Tmp0= _mm_unpacklo_epi32(E0h,E1h);
                 m128Tmp1= _mm_unpacklo_epi32(E2h,E3h);
@@ -5197,6 +5204,9 @@ void ff_hevc_transform_32x32_add_8_sse4(uint8_t *_dst, const int16_t *coeffs,
         }
     }
 }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 #endif
 
 
@@ -7089,6 +7099,138 @@ void ff_hevc_transform_32x32_add_10_sse4(uint8_t *_dst, const int16_t *coeffs,
             }
         }
     }
+}
+#endif
+
+
+#if HAVE_SSE4_1
+// Add the int32 residual block 'r' (nT x nT, row-major, nT values per row) to
+// the prediction samples in 'dst' and clip into the valid pixel range.
+// Equivalent to add_residual_fallback<uint8_t> (bit_depth is always 8 here).
+void add_residual_8_sse4(uint8_t *dst, ptrdiff_t stride,
+                         const int32_t* r, int nT, int bit_depth)
+{
+  if (nT==4) {
+    for (int y=0;y<4;y++) {
+      uint8_t* drow = dst + y*stride;
+
+      __m128i res = _mm_loadu_si128((const __m128i*)(r + y*4));     // 4 x int32 residual
+      __m128i pix = _mm_cvtsi32_si128(*(const int32_t*)drow);       // 4 x uint8
+      pix = _mm_cvtepu8_epi32(pix);                                 // -> 4 x int32
+
+      __m128i sum = _mm_add_epi32(res, pix);
+      sum = _mm_packs_epi32(sum, sum);                              // -> int16 (saturate)
+      sum = _mm_packus_epi16(sum, sum);                             // -> uint8  (clip 0..255)
+
+      *(int32_t*)drow = _mm_cvtsi128_si32(sum);
+    }
+  }
+  else {
+    // nT is 8, 16 or 32 -> always a multiple of 8
+    for (int y=0;y<nT;y++) {
+      const int32_t* rrow = r + y*nT;
+      uint8_t*       drow = dst + y*stride;
+
+      for (int x=0;x<nT;x+=8) {
+        __m128i r0  = _mm_loadu_si128((const __m128i*)(rrow + x));    // 4 x int32
+        __m128i r1  = _mm_loadu_si128((const __m128i*)(rrow + x+4));  // 4 x int32
+        __m128i pix = _mm_loadl_epi64((const __m128i*)(drow + x));    // 8 x uint8
+
+        __m128i p0 = _mm_cvtepu8_epi32(pix);                         // 4 x int32
+        __m128i p1 = _mm_cvtepu8_epi32(_mm_srli_si128(pix,4));       // 4 x int32
+
+        __m128i s0 = _mm_add_epi32(r0, p0);
+        __m128i s1 = _mm_add_epi32(r1, p1);
+
+        __m128i p16 = _mm_packs_epi32(s0, s1);                       // 8 x int16 (saturate)
+        __m128i p8  = _mm_packus_epi16(p16, p16);                    // 8 x uint8 (clip 0..255)
+
+        _mm_storel_epi64((__m128i*)(drow + x), p8);
+      }
+    }
+  }
+}
+
+
+// 16-bit (high bit-depth) variant. Equivalent to add_residual_fallback<uint16_t>.
+void add_residual_16_sse4(uint16_t *dst, ptrdiff_t stride,
+                          const int32_t* r, int nT, int bit_depth)
+{
+  const int32_t maxval = (1<<bit_depth)-1;
+  const __m128i vmax  = _mm_set1_epi32(maxval);
+  const __m128i vzero = _mm_setzero_si128();
+
+  if (nT==4) {
+    for (int y=0;y<4;y++) {
+      uint16_t* drow = dst + y*stride;
+
+      __m128i res = _mm_loadu_si128((const __m128i*)(r + y*4));     // 4 x int32 residual
+      __m128i pix = _mm_loadl_epi64((const __m128i*)drow);          // 4 x uint16
+      pix = _mm_cvtepu16_epi32(pix);                                // -> 4 x int32
+
+      __m128i sum = _mm_add_epi32(res, pix);
+      sum = _mm_min_epi32(_mm_max_epi32(sum, vzero), vmax);         // clip 0..maxval
+      sum = _mm_packus_epi32(sum, sum);                             // -> uint16
+
+      _mm_storel_epi64((__m128i*)drow, sum);
+    }
+  }
+  else {
+    // nT is 8, 16 or 32 -> always a multiple of 8
+    for (int y=0;y<nT;y++) {
+      const int32_t* rrow = r + y*nT;
+      uint16_t*      drow = dst + y*stride;
+
+      for (int x=0;x<nT;x+=8) {
+        __m128i r0  = _mm_loadu_si128((const __m128i*)(rrow + x));    // 4 x int32
+        __m128i r1  = _mm_loadu_si128((const __m128i*)(rrow + x+4));  // 4 x int32
+        __m128i pix = _mm_loadu_si128((const __m128i*)(drow + x));    // 8 x uint16
+
+        __m128i p0 = _mm_cvtepu16_epi32(pix);                        // 4 x int32
+        __m128i p1 = _mm_cvtepu16_epi32(_mm_srli_si128(pix,8));      // 4 x int32
+
+        __m128i s0 = _mm_add_epi32(r0, p0);
+        __m128i s1 = _mm_add_epi32(r1, p1);
+
+        s0 = _mm_min_epi32(_mm_max_epi32(s0, vzero), vmax);          // clip 0..maxval
+        s1 = _mm_min_epi32(_mm_max_epi32(s1, vzero), vmax);
+
+        __m128i out = _mm_packus_epi32(s0, s1);                      // 8 x uint16
+        _mm_storeu_si128((__m128i*)(drow + x), out);
+      }
+    }
+  }
+}
+
+
+// Inverse quantization without scaling list, int32 fast path (see acceleration.h).
+// Vectorizes the multiply/round/clip 8 coefficients at a time; the scatter into
+// coeffBuf[coeffPos[i]] stays scalar (no 16-bit SIMD scatter exists).
+void dequant_coeff_block_sse4(int16_t* coeffBuf, const int16_t* coeffList,
+                              const int16_t* coeffPos, int nCoeff,
+                              int32_t fact, int32_t offset, int32_t bdShift)
+{
+  const __m128i vfact = _mm_set1_epi32(fact);
+  const __m128i voff  = _mm_set1_epi32(offset);
+  const __m128i vsh   = _mm_cvtsi32_si128(bdShift);
+
+  alignas(16) int16_t tmp[8];
+  int i = 0;
+  for (; i+8 <= nCoeff; i += 8) {
+    __m128i c  = _mm_loadu_si128((const __m128i*)(coeffList + i));  // 8 int16
+    __m128i lo = _mm_cvtepi16_epi32(c);                            // c[i..i+3]
+    __m128i hi = _mm_cvtepi16_epi32(_mm_srli_si128(c, 8));         // c[i+4..i+7]
+    lo = _mm_sra_epi32(_mm_add_epi32(_mm_mullo_epi32(lo, vfact), voff), vsh);
+    hi = _mm_sra_epi32(_mm_add_epi32(_mm_mullo_epi32(hi, vfact), voff), vsh);
+    __m128i r = _mm_packs_epi32(lo, hi);                           // signed sat == Clip3
+    _mm_store_si128((__m128i*)tmp, r);
+    for (int k=0;k<8;k++) coeffBuf[ coeffPos[i+k] ] = tmp[k];      // scatter
+  }
+  for (; i < nCoeff; i++) {
+    int32_t v = (coeffList[i]*fact + offset) >> bdShift;
+    v = v < -32768 ? -32768 : (v > 32767 ? 32767 : v);
+    coeffBuf[ coeffPos[i] ] = (int16_t)v;
+  }
 }
 #endif
 

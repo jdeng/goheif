@@ -30,6 +30,7 @@
 #include <algorithm>
 
 
+#if 0
 static void printMatrix(const char* name, const int16_t* v, int n)
 {
   printf("--- %s ---\n",name);
@@ -40,7 +41,7 @@ static void printMatrix(const char* name, const int16_t* v, int n)
     printf("\n");
   }
 }
-
+#endif
 
 
 void transform_skip_8_fallback(uint8_t *dst, const int16_t *coeffs, ptrdiff_t stride)
@@ -84,7 +85,7 @@ void transform_skip_residual_fallback(int32_t *residual, const int16_t *coeffs, 
 
   for (int y=0;y<nT;y++)
     for (int x=0;x<nT;x++) {
-      int32_t c = coeffs[x+y*nT] << tsShift;
+      int32_t c = (int32_t)((uint32_t)coeffs[x+y*nT] << tsShift); // C++ up to C++17 treats left-shift of signed values as UB
       residual[x+y*nT] = (c + rnd) >> bdShift;
     }
 }
@@ -102,7 +103,7 @@ void transform_skip_rdpcm_v_8_fallback(uint8_t *dst, const int16_t *coeffs, int 
     int32_t sum = 0;
 
     for (int y=0;y<nT;y++) {
-      int c = coeffs[x+y*nT] << tsShift;
+      int32_t c = (int32_t)((uint32_t)coeffs[x+y*nT] << tsShift);
       sum += (c+offset)>>bdShift2;
 
       dst[y*stride+x] = Clip1_8bit(dst[y*stride+x] + sum);
@@ -122,7 +123,7 @@ void transform_skip_rdpcm_h_8_fallback(uint8_t *dst, const int16_t *coeffs, int 
     int32_t sum = 0;
 
     for (int x=0;x<nT;x++) {
-      int c = coeffs[x+y*nT] << tsShift;
+      int32_t c = (int32_t)((uint32_t)coeffs[x+y*nT] << tsShift);
       sum += (c+offset)>>bdShift2;
 
       dst[y*stride+x] = Clip1_8bit(dst[y*stride+x] + sum);
@@ -190,7 +191,7 @@ void rdpcm_v_fallback(int32_t* residual, const int16_t* coeffs, int nT,int tsShi
   for (int x=0;x<nT;x++) {
     int sum=0;
     for (int y=0;y<nT;y++) {
-      int c = coeffs[x+y*nT] << tsShift;
+      int32_t c = (int32_t)((uint32_t)coeffs[x+y*nT] << tsShift);
       sum += (c+rnd)>>bdShift;
       residual[y*nT+x] = sum;
     }
@@ -205,7 +206,7 @@ void rdpcm_h_fallback(int32_t* residual, const int16_t* coeffs, int nT,int tsShi
   for (int y=0;y<nT;y++) {
     int sum=0;
     for (int x=0;x<nT;x++) {
-      int c = coeffs[x+y*nT] << tsShift;
+      int32_t c = (int32_t)((uint32_t)coeffs[x+y*nT] << tsShift);
       sum += (c+rnd)>>bdShift;
       residual[y*nT+x] = sum;
     }
@@ -237,8 +238,6 @@ void transform_bypass_8_fallback(uint8_t *dst, const int16_t *coeffs, int nT, pt
 
 void transform_bypass_16_fallback(uint16_t *dst, const int16_t *coeffs, int nT, ptrdiff_t stride, int bit_depth)
 {
-  int bdShift2 = 20-bit_depth;
-
   for (int y=0;y<nT;y++)
     for (int x=0;x<nT;x++) {
       int32_t c = coeffs[x+y*nT];
@@ -1207,4 +1206,15 @@ void hadamard_16x16_8_fallback(int16_t *coeffs, const int16_t *input, ptrdiff_t 
 void hadamard_32x32_8_fallback(int16_t *coeffs, const int16_t *input, ptrdiff_t stride)
 {
   hadamard_transform_8(coeffs,32, input,stride);
+}
+
+
+void dequant_coeff_block_fallback(int16_t* coeffBuf, const int16_t* coeffList,
+                                  const int16_t* coeffPos, int nCoeff,
+                                  int32_t fact, int32_t offset, int32_t bdShift)
+{
+  for (int i=0;i<nCoeff;i++) {
+    int32_t v = Clip3(-32768, 32767, (coeffList[i]*fact + offset) >> bdShift);
+    coeffBuf[ coeffPos[i] ] = (int16_t)v;
+  }
 }

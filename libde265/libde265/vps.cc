@@ -27,37 +27,37 @@
 
 void profile_data::set_defaults(enum profile_idc profile, int level_major, int level_minor)
 {
-  profile_present_flag = 1;
+  profile_present_flag = true;
 
   profile_space = 0;
-  tier_flag = 0;
+  tier_flag = false;
   profile_idc = profile;
 
   for (int i=0;i<32;i++) {
-    profile_compatibility_flag[i]=0;
+    profile_compatibility_flag[i]=false;
   }
 
   switch (profile) {
   case Profile_Main:
-    profile_compatibility_flag[Profile_Main]=1;
-    profile_compatibility_flag[Profile_Main10]=1;
+    profile_compatibility_flag[Profile_Main]=true;
+    profile_compatibility_flag[Profile_Main10]=true;
     break;
   case Profile_Main10:
-    profile_compatibility_flag[Profile_Main10]=1;
+    profile_compatibility_flag[Profile_Main10]=true;
     break;
   default:
     assert(0);
   }
 
-  progressive_source_flag = 0;
-  interlaced_source_flag  = 0;
-  non_packed_constraint_flag = 0;
-  frame_only_constraint_flag = 0;
+  progressive_source_flag = false;
+  interlaced_source_flag  = false;
+  non_packed_constraint_flag = false;
+  frame_only_constraint_flag = false;
 
 
   // --- level ---
 
-  level_present_flag = 1;
+  level_present_flag = true;
   level_idc = level_major*30 + level_minor*3;
 }
 
@@ -101,20 +101,20 @@ void video_parameter_set::set_defaults(enum profile_idc profile, int level_major
 
 de265_error video_parameter_set::read(error_queue* errqueue, bitreader* reader)
 {
-  int vlc;
+  uint32_t vlc;
 
-  video_parameter_set_id = vlc = get_bits(reader, 4);
+  video_parameter_set_id = vlc = reader->get_bits(4);
   if (vlc >= DE265_MAX_VPS_SETS) return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
 
-  skip_bits(reader, 2);
-  vps_max_layers = vlc = get_bits(reader,6) +1;
+  reader->skip_bits(2);
+  vps_max_layers = vlc = reader->get_bits(6) +1;
   if (vlc > 63) return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE; // vps_max_layers_minus1 (range 0...63)
 
-  vps_max_sub_layers = vlc = get_bits(reader,3) +1;
+  vps_max_sub_layers = vlc = reader->get_bits(3) +1;
   if (vlc >= MAX_TEMPORAL_SUBLAYERS) return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
 
-  vps_temporal_id_nesting_flag = get_bits(reader,1);
-  skip_bits(reader, 16);
+  vps_temporal_id_nesting_flag = reader->get_bits(1);
+  reader->skip_bits(16);
 
   profile_tier_level_.read(reader, vps_max_sub_layers);
 
@@ -123,21 +123,27 @@ de265_error video_parameter_set::read(error_queue* errqueue, bitreader* reader)
     0, vps_max_sub_layers-1);
   */
 
-  vps_sub_layer_ordering_info_present_flag = get_bits(reader,1);
+  vps_sub_layer_ordering_info_present_flag = reader->get_bits(1);
   //assert(vps_max_sub_layers-1 < MAX_TEMPORAL_SUBLAYERS);
 
   int firstLayerRead = vps_sub_layer_ordering_info_present_flag ? 0 : (vps_max_sub_layers-1);
 
   for (int i=firstLayerRead;i<vps_max_sub_layers;i++) {
-    layer[i].vps_max_dec_pic_buffering = get_uvlc(reader);
-    layer[i].vps_max_num_reorder_pics  = get_uvlc(reader);
-    layer[i].vps_max_latency_increase  = get_uvlc(reader);
+    uint32_t v1 = reader->get_uvlc();
+    uint32_t v2 = reader->get_uvlc();
+    uint32_t v3 = reader->get_uvlc();
 
-if (layer[i].vps_max_dec_pic_buffering == UVLC_ERROR ||
-    layer[i].vps_max_num_reorder_pics  == UVLC_ERROR ||
-    layer[i].vps_max_latency_increase  == UVLC_ERROR) {
+    if (v1 == UVLC_ERROR || v2 == UVLC_ERROR || v3 == UVLC_ERROR) {
       return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
     }
+
+    if (v1 > 16 || v2 > v1) {
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+
+    layer[i].vps_max_dec_pic_buffering = v1;
+    layer[i].vps_max_num_reorder_pics  = v2;
+    layer[i].vps_max_latency_increase  = v3;
   }
 
   if (!vps_sub_layer_ordering_info_present_flag) {
@@ -151,16 +157,13 @@ if (layer[i].vps_max_dec_pic_buffering == UVLC_ERROR ||
   }
 
 
-  vps_max_layer_id = get_bits(reader,6);
-  vps_num_layer_sets = get_uvlc(reader);
-
-  if (vps_num_layer_sets+1<0 ||
-      vps_num_layer_sets+1>=1024 ||
-      vps_num_layer_sets == UVLC_ERROR) {
+  vps_max_layer_id = reader->get_bits(6);
+  if ((vlc = reader->get_uvlc()) == UVLC_ERROR ||
+      vlc+1>=1024) {
     errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
-  vps_num_layer_sets += 1;
+  vps_num_layer_sets = vlc + 1;
 
   layer_id_included_flag.resize(vps_num_layer_sets);
 
@@ -170,34 +173,46 @@ if (layer[i].vps_max_dec_pic_buffering == UVLC_ERROR ||
 
       for (int j=0; j <= vps_max_layer_id; j++)
         {
-          layer_id_included_flag[i][j] = get_bits(reader,1);
+          layer_id_included_flag[i][j] = reader->get_bits(1);
         }
     }
 
-  vps_timing_info_present_flag = get_bits(reader,1);
+  vps_timing_info_present_flag = reader->get_bits(1);
 
   if (vps_timing_info_present_flag) {
-    vps_num_units_in_tick = get_bits(reader,32);
-    vps_time_scale        = get_bits(reader,32);
-    vps_poc_proportional_to_timing_flag = get_bits(reader,1);
+    vps_num_units_in_tick = reader->get_bits(32);
+    vps_time_scale        = reader->get_bits(32);
+    vps_poc_proportional_to_timing_flag = reader->get_bits(1);
 
     if (vps_poc_proportional_to_timing_flag) {
-      vps_num_ticks_poc_diff_one = get_uvlc(reader)+1;
-      vps_num_hrd_parameters     = get_uvlc(reader);
-
-      if (vps_num_hrd_parameters >= 1024 || vps_num_hrd_parameters < 0) {
+      vlc = reader->get_uvlc();
+      if (vlc == UVLC_ERROR) {
         errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
         return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
       }
+      vps_num_ticks_poc_diff_one = vlc + 1;
+
+      vlc = reader->get_uvlc();
+
+      if (vlc == UVLC_ERROR || vlc > vps_num_layer_sets) {
+        errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+        return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+      }
+      vps_num_hrd_parameters = vlc;
 
       hrd_layer_set_idx .resize(vps_num_hrd_parameters);
       cprms_present_flag.resize(vps_num_hrd_parameters);
 
       for (int i=0; i<vps_num_hrd_parameters; i++) {
-        hrd_layer_set_idx[i] = get_uvlc(reader);
+        vlc = reader->get_uvlc();
+        if (vlc == UVLC_ERROR || vlc > 1023) {
+          errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+          return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+        }
+        hrd_layer_set_idx[i] = vlc;
 
         if (i > 0) {
-          cprms_present_flag[i] = get_bits(reader,1);
+          cprms_present_flag[i] = reader->get_bits(1);
         }
 
         //hrd_parameters(cprms_present_flag[i], vps_max_sub_layers_minus1)
@@ -207,7 +222,7 @@ if (layer[i].vps_max_dec_pic_buffering == UVLC_ERROR ||
     }
   }
 
-  vps_extension_flag = get_bits(reader,1);
+  vps_extension_flag = reader->get_bits(1);
 
   if (vps_extension_flag) {
     /*
@@ -253,8 +268,7 @@ de265_error video_parameter_set::write(error_queue* errqueue, CABAC_encoder& out
     out.write_uvlc(layer[i].vps_max_latency_increase);
   }
 
-  if (vps_num_layer_sets<0 ||
-      vps_num_layer_sets>=1024) {
+  if (vps_num_layer_sets>=1024) {
     errqueue->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
@@ -310,23 +324,23 @@ de265_error video_parameter_set::write(error_queue* errqueue, CABAC_encoder& out
 void profile_data::read(bitreader* reader)
 {
   if (profile_present_flag) {
-    profile_space = get_bits(reader,2);
-    tier_flag = get_bits(reader,1);
-    profile_idc = (enum profile_idc)get_bits(reader,5);
+    profile_space = reader->get_bits(2);
+    tier_flag = reader->get_bits(1);
+    profile_idc = (enum profile_idc)reader->get_bits(5);
 
     for (int i=0; i<32; i++) {
-      profile_compatibility_flag[i] = get_bits(reader,1);
+      profile_compatibility_flag[i] = reader->get_bits(1);
     }
 
-    progressive_source_flag = get_bits(reader,1);
-    interlaced_source_flag  = get_bits(reader,1);
-    non_packed_constraint_flag = get_bits(reader,1);
-    frame_only_constraint_flag = get_bits(reader,1);
-    skip_bits(reader,44);
+    progressive_source_flag = reader->get_bits(1);
+    interlaced_source_flag  = reader->get_bits(1);
+    non_packed_constraint_flag = reader->get_bits(1);
+    frame_only_constraint_flag = reader->get_bits(1);
+    reader->skip_bits(44);
   }
 
   if (level_present_flag) {
-    level_idc = get_bits(reader,8);
+    level_idc = reader->get_bits(8);
   }
 }
 
@@ -345,15 +359,15 @@ void profile_tier_level::read(bitreader* reader,
 
   for (int i=0; i<max_sub_layers-1; i++)
     {
-      sub_layer[i].profile_present_flag = get_bits(reader,1);
-      sub_layer[i].level_present_flag   = get_bits(reader,1);
+      sub_layer[i].profile_present_flag = reader->get_bits(1);
+      sub_layer[i].level_present_flag   = reader->get_bits(1);
     }
 
   if (max_sub_layers > 1)
     {
       for (int i=max_sub_layers-1; i<8; i++)
         {
-          skip_bits(reader,2);
+          reader->skip_bits(2);
         }
     }
 
@@ -392,8 +406,8 @@ void profile_data::write(CABAC_encoder& out) const
 
 void profile_tier_level::write(CABAC_encoder& out, int max_sub_layers) const
 {
-  assert(general.profile_present_flag==true);
-  assert(general.level_present_flag==true);
+  assert(general.profile_present_flag);
+  assert(general.level_present_flag);
 
   general.write(out);
 
@@ -426,17 +440,17 @@ void read_bit_rate_pic_rate_info(bitreader* reader,
 {
   for (int i=TempLevelLow; i<=TempLevelHigh; i++) {
 
-    hdr->bit_rate_info_present_flag[i] = get_bits(reader,1);
-    hdr->pic_rate_info_present_flag[i] = get_bits(reader,1);
+    hdr->bit_rate_info_present_flag[i] = reader->get_bits(1);
+    hdr->pic_rate_info_present_flag[i] = reader->get_bits(1);
 
     if (hdr->bit_rate_info_present_flag[i]) {
-      hdr->avg_bit_rate[i] = get_bits(reader,16);
-      hdr->max_bit_rate[i] = get_bits(reader,16);
+      hdr->avg_bit_rate[i] = reader->get_bits(16);
+      hdr->max_bit_rate[i] = reader->get_bits(16);
     }
 
     if (hdr->pic_rate_info_present_flag[i]) {
-      hdr->constant_pic_rate_idc[i] = get_bits(reader,2);
-      hdr->avg_pic_rate[i] = get_bits(reader,16);
+      hdr->constant_pic_rate_idc[i] = reader->get_bits(2);
+      hdr->avg_pic_rate[i] = reader->get_bits(16);
     }
   }
 }

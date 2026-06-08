@@ -25,15 +25,9 @@
 
 bool D = false;
 
-context_model_table::context_model_table()
-  : model(NULL), refcnt(NULL)
-{
-}
-
-
 context_model_table::context_model_table(const context_model_table& src)
 {
-  if (D) printf("%p c'tor = %p\n",this,&src);
+  if (D) printf("%p c'tor = %p\n",static_cast<void*>(this),static_cast<const void*>(&src));
 
   if (src.refcnt) {
     (*(src.refcnt))++;
@@ -46,12 +40,12 @@ context_model_table::context_model_table(const context_model_table& src)
 
 context_model_table::~context_model_table()
 {
-  if (D) printf("%p destructor\n",this);
+  if (D) printf("%p destructor\n",static_cast<void*>(this));
 
   if (refcnt) {
     (*refcnt)--;
     if (*refcnt==0) {
-      if (D) printf("mfree %p\n",model);
+      if (D) printf("mfree %p\n",static_cast<void*>(model));
       delete[] model;
       delete refcnt;
     }
@@ -61,7 +55,7 @@ context_model_table::~context_model_table()
 
 void context_model_table::init(int initType, int QPY)
 {
-  if (D) printf("%p init\n",this);
+  if (D) printf("%p init\n",static_cast<void*>(this));
 
   decouple_or_alloc_with_empty_data();
 
@@ -71,7 +65,7 @@ void context_model_table::init(int initType, int QPY)
 
 void context_model_table::release()
 {
-  if (D) printf("%p release %p\n",this,refcnt);
+  if (D) printf("%p release %p\n",static_cast<void*>(this),static_cast<void*>(refcnt));
 
   if (!refcnt) { return; }
 
@@ -90,9 +84,9 @@ void context_model_table::release()
 
 void context_model_table::decouple()
 {
-  if (D) printf("%p decouple (%p)\n",this,refcnt);
+  if (D) printf("%p decouple (%p)\n",static_cast<void*>(this),static_cast<void*>(refcnt));
 
-  assert(refcnt); // not necessarily so, but we never use it on an unitialized object
+  assert(refcnt); // not necessarily so, but we never use it on an uninitialized object
 
   if (*refcnt > 1) {
     (*refcnt)--;
@@ -123,9 +117,9 @@ context_model_table context_model_table::transfer()
 
 context_model_table& context_model_table::operator=(const context_model_table& src)
 {
-  if (D) printf("%p assign = %p\n",this,&src);
+  if (D) printf("%p assign = %p\n",static_cast<void*>(this),static_cast<const void*>(&src));
 
-  // assert(src.refcnt); // not necessarily so, but we never use it on an unitialized object
+  // assert(src.refcnt); // not necessarily so, but we never use it on an uninitialized object
 
   if (!src.refcnt) {
     release();
@@ -178,7 +172,7 @@ void context_model_table::decouple_or_alloc_with_empty_data()
     (*refcnt)--;
   }
 
-  if (D) printf("%p (alloc)\n",this);
+  if (D) printf("%p (alloc)\n",static_cast<void*>(this));
 
   model = new context_model[CONTEXT_MODEL_TABLE_LENGTH];
   // Without initializing the model, we got an invalid model state during decoding (issue #236)

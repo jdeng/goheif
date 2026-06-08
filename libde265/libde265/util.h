@@ -31,6 +31,7 @@
 
 #include <stdio.h>
 #include <string>
+#include <cstdlib>
 
 #include "libde265/de265.h"
 
@@ -64,39 +65,6 @@
 #define ALIGNED_8( var )  LIBDE265_DECLARE_ALIGNED( var, 8 )
 #define ALIGNED_4( var )  LIBDE265_DECLARE_ALIGNED( var, 4 )
 
-// C++11 specific features
-#if defined(_MSC_VER) || (!__clang__ && __GNUC__ && GCC_VERSION < 40600)
-#define FOR_LOOP(type, var, list)   for each (type var in list)
-#undef FOR_LOOP_AUTO_SUPPORT
-#else
-#define FOR_LOOP(type, var, list)   for (type var : list)
-#define FOR_LOOP_AUTO_SUPPORT 1
-#endif
-
-#ifdef USE_STD_TR1_NAMESPACE
-#include <tr1/memory>
-namespace std { using namespace std::tr1; }
-#endif
-
-#ifdef NEED_STD_MOVE_FALLBACK
-// Provide fallback variant of "std::move" for older compilers with
-// incomplete/broken C++11 support.
-namespace std {
-
-template<typename _Tp>
-inline typename std::remove_reference<_Tp>::type&& move(_Tp&& __t) {
-  return static_cast<typename std::remove_reference<_Tp>::type&&>(__t);
-}
-
-}  // namespace std
-#endif
-
-#ifdef NEED_NULLPTR_FALLBACK
-// Compilers with partial/incomplete support for C++11 don't know about
-// "nullptr". A simple alias should be fine for our use case.
-#define nullptr NULL
-#endif
-
 #ifdef _MSC_VER
   #ifdef _CPPRTTI
   #define RTTI_ENABLED
@@ -107,22 +75,35 @@ inline typename std::remove_reference<_Tp>::type&& move(_Tp&& __t) {
   #endif
 #endif
 
-//inline uint8_t Clip1_8bit(int16_t value) { if (value<=0) return 0; else if (value>=255) return 255; else return value; }
-#define Clip1_8bit(value) ((value)<0 ? 0 : (value)>255 ? 255 : (value))
-#define Clip_BitDepth(value, bit_depth) ((value)<0 ? 0 : (value)>((1<<bit_depth)-1) ? ((1<<bit_depth)-1) : (value))
-#define Clip3(low,high,value) ((value)<(low) ? (low) : (value)>(high) ? (high) : (value))
-#define Sign(value) (((value)<0) ? -1 : ((value)>0) ? 1 : 0)
-#define abs_value(a) (((a)<0) ? -(a) : (a))
-#define libde265_min(a,b) (((a)<(b)) ? (a) : (b))
-#define libde265_max(a,b) (((a)>(b)) ? (a) : (b))
+inline static int Clip1_8bit(int value)
+{
+  return value<0 ? 0 : value>255 ? 255 : value;
+}
 
-LIBDE265_INLINE static int ceil_div(int num,int denom)
+inline static int Clip_BitDepth(int value, int bit_depth)
+{
+  const int maxval = (1<<bit_depth)-1;
+  return value<0 ? 0 : value>maxval ? maxval : value;
+}
+
+inline static int Clip3(int low, int high, int value)
+{
+  return value<low ? low : value>high ? high : value;
+}
+
+// three-valued sign: returns -1, 0, or +1
+template <typename T> inline int Sign(T value)
+{
+  return (T(0) < value) - (value < T(0));
+}
+
+inline static int ceil_div(int num,int denom)
 {
   num += denom-1;
   return num/denom;
 }
 
-LIBDE265_INLINE static int ceil_log2(int val)
+inline static int ceil_log2(int val)
 {
   int n=0;
   while (val > (1<<n)) {
@@ -132,7 +113,7 @@ LIBDE265_INLINE static int ceil_log2(int val)
   return n;
 }
 
-LIBDE265_INLINE static int Log2(int v)
+inline static int Log2(int v)
 {
   int n=0;
   while (v>1) {
@@ -143,7 +124,7 @@ LIBDE265_INLINE static int Log2(int v)
   return n;
 }
 
-LIBDE265_INLINE static int Log2SizeToArea(int v)
+inline static int Log2SizeToArea(int v)
 {
   return (1<<(v<<1));
 }
@@ -193,27 +174,27 @@ void log_set_current_POC(int poc);
 #ifdef DE265_LOG_ERROR
 void logerror(enum LogModule module, const char* string, ...);
 #else
-#define logerror(a,b, ...) { }
+#define logerror(...) { }
 #endif
 
 #ifdef DE265_LOG_INFO
 void loginfo (enum LogModule module, const char* string, ...);
 #else
-#define loginfo(a,b, ...) { }
+#define loginfo(...) { }
 #endif
 
 #ifdef DE265_LOG_DEBUG
 void logdebug(enum LogModule module, const char* string, ...);
 bool logdebug_enabled(enum LogModule module);
 #else
-#define logdebug(a,b, ...) { }
+#define logdebug(...) { }
 inline bool logdebug_enabled(enum LogModule module) { return false; }
 #endif
 
 #ifdef DE265_LOG_TRACE
 void logtrace(enum LogModule module, const char* string, ...);
 #else
-#define logtrace(a,b, ...) { }
+#define logtrace(...) { }
 #endif
 
 void log2fh(FILE* fh, const char* string, ...);

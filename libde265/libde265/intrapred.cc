@@ -21,6 +21,7 @@
 #include "intrapred.h"
 #include "transform.h"
 #include "util.h"
+#include "decctx.h"
 #include <assert.h>
 
 
@@ -158,6 +159,7 @@ int find_intra_pred_mode(enum IntraPredMode mode,
 }
 
 
+#if 0
 void list_chroma_pred_candidates(enum IntraPredMode chroma_mode[5],
                                  enum IntraPredMode luma_mode)
 {
@@ -178,6 +180,7 @@ void list_chroma_pred_candidates(enum IntraPredMode chroma_mode[5],
     break;
   }
 }
+#endif
 
 
 int get_intra_scan_idx(int log2TrafoSize, enum IntraPredMode intraPredMode, int cIdx,
@@ -290,12 +293,14 @@ void decode_intra_prediction_internal(de265_image* img,
     }
 
 
+  const acceleration_functions& acceleration = img->decctx->acceleration;
+
   switch (intraPredMode) {
   case INTRA_PLANAR:
-    intra_prediction_planar(dst,dstStride, nT,cIdx, border_pixels);
+    acceleration.intra_pred_planar<pixel_t>(dst,dstStride, nT,cIdx, border_pixels);
     break;
   case INTRA_DC:
-    intra_prediction_DC(dst,dstStride, nT,cIdx, border_pixels);
+    acceleration.intra_pred_dc<pixel_t>(dst,dstStride, nT,cIdx, border_pixels);
     break;
   default:
     {
@@ -304,8 +309,8 @@ void decode_intra_prediction_internal(de265_image* img,
         (img->get_sps().range_extension.implicit_rdpcm_enabled_flag &&
          img->get_cu_transquant_bypass(xB0,yB0));
 
-      intra_prediction_angular(dst,dstStride, bit_depth,disableIntraBoundaryFilter,
-                               xB0,yB0,intraPredMode,nT,cIdx, border_pixels);
+      acceleration.intra_pred_angular<pixel_t>(dst,dstStride, bit_depth,disableIntraBoundaryFilter,
+                                               xB0,yB0,intraPredMode,nT,cIdx, border_pixels);
     }
     break;
   }

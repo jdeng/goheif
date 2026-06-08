@@ -10,15 +10,19 @@
 #include "alloc_pool.cc"
 #include "bitstream.cc"
 #include "cabac.cc"
-#include "configparam.cc"
 #include "contextmodel.cc"
 #include "de265.cc"
 #include "deblock.cc"
 #include "decctx.cc"
 #include "dpb.cc"
-// #include "en265.cc"
 #include "fallback-dct.cc"
+#include "fallback-deblk.cc"
+#include "fallback-intrapred.cc"
+#define extra_before fallback_motion_extra_before
+#define extra_after fallback_motion_extra_after
 #include "fallback-motion.cc"
+#undef extra_after
+#undef extra_before
 #include "fallback.cc"
 #include "image-io.cc"
 #include "image.cc"
@@ -44,12 +48,20 @@
 
 #ifdef HAVE_SSE4_1
 #include "x86/sse-dct.cc"
+#include "x86/sse-deblk.cc"
+#include "x86/sse-intrapred.cc"
 #include "x86/sse-motion.cc"
 #include "x86/sse.cc"
 #endif
 
-#ifdef HAVE_ARM
-#include "arm/arm.cc"
+#if HAVE_AVX2
+#include "x86/transform-avx2.cc"
 #endif
 
+#if HAVE_AVX512
+#include "x86/transform-avx512.cc"
+#endif
 
+#ifdef HAVE_ARM32
+#include "arm32/arm.cc"
+#endif

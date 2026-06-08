@@ -1,10 +1,10 @@
 package libde265
 
 //#cgo CFLAGS: -I.
-//#cgo amd64 CXXFLAGS: -Ilibde265 -I. -std=c++11 -DHAVE_SSE4_1 -msse4.1
-//#cgo arm64 CXXFLAGS: -Ilibde265 -I. -std=c++11 -DHAVE_ARM
-//#cgo darwin,amd64 CXXFLAGS: -Ilibde265 -I. -std=c++11 -DHAVE_SSE4_1 -msse4.1 -Wno-constant-conversion
-//#cgo darwin,amd64 CXXFLAGS: -Ilibde265 -I. -std=c++11 -DHAVE_ARM
+//#cgo CXXFLAGS: -Ilibde265 -I. -std=c++17
+//#cgo amd64 CXXFLAGS: -DHAVE_SSE4_1 -msse4.1
+//#cgo arm CXXFLAGS: -DHAVE_ARM32
+//#cgo darwin,amd64 CXXFLAGS: -Wno-constant-conversion
 // #include <stdint.h>
 // #include <stdlib.h>
 // #include "libde265/de265.h"

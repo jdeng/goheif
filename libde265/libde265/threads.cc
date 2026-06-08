@@ -29,74 +29,13 @@
 #endif
 
 
-#ifndef _WIN32
-// #include <intrin.h>
-
-#define THREAD_RESULT_TYPE  void*
-#define THREAD_PARAM_TYPE   void*
-#define THREAD_CALLING_CONVENTION
-
-#include <stdio.h>
-
-int  de265_thread_create(de265_thread* t, void *(*start_routine) (void *), void *arg) { return pthread_create(t,NULL,start_routine,arg); }
-void de265_thread_join(de265_thread t) { pthread_join(t,NULL); }
-void de265_thread_destroy(de265_thread* t) { }
-void de265_mutex_init(de265_mutex* m) { pthread_mutex_init(m,NULL); }
-void de265_mutex_destroy(de265_mutex* m) { pthread_mutex_destroy(m); }
-void de265_mutex_lock(de265_mutex* m) { pthread_mutex_lock(m); }
-void de265_mutex_unlock(de265_mutex* m) { pthread_mutex_unlock(m); }
-void de265_cond_init(de265_cond* c) { pthread_cond_init(c,NULL); }
-void de265_cond_destroy(de265_cond* c) { pthread_cond_destroy(c); }
-void de265_cond_broadcast(de265_cond* c,de265_mutex* m) { pthread_cond_broadcast(c); }
-void de265_cond_wait(de265_cond* c,de265_mutex* m) { pthread_cond_wait(c,m); }
-void de265_cond_signal(de265_cond* c) { pthread_cond_signal(c); }
-#else  // _WIN32
-
-#define THREAD_RESULT_TYPE    DWORD
-#define THREAD_CALLING_CONVENTION WINAPI
-#define THREAD_PARAM_TYPE        LPVOID
-
-int  de265_thread_create(de265_thread* t, LPTHREAD_START_ROUTINE start_routine, void *arg) {
-    HANDLE handle = CreateThread(NULL, 0, start_routine, arg, 0, NULL);
-    if (handle == NULL) {
-        return -1;
-    }
-    *t = handle;
-    return 0;
-}
-void de265_thread_join(de265_thread t) { WaitForSingleObject(t, INFINITE); }
-void de265_thread_destroy(de265_thread* t) { CloseHandle(*t); *t = NULL; }
-void de265_mutex_init(de265_mutex* m) { *m = CreateMutex(NULL, FALSE, NULL); }
-void de265_mutex_destroy(de265_mutex* m) { CloseHandle(*m); }
-void de265_mutex_lock(de265_mutex* m) { WaitForSingleObject(*m, INFINITE); }
-void de265_mutex_unlock(de265_mutex* m) { ReleaseMutex(*m); }
-void de265_cond_init(de265_cond* c) { win32_cond_init(c); }
-void de265_cond_destroy(de265_cond* c) { win32_cond_destroy(c); }
-void de265_cond_broadcast(de265_cond* c,de265_mutex* m)
-{
-  de265_mutex_lock(m);
-  win32_cond_broadcast(c);
-  de265_mutex_unlock(m);
-}
-void de265_cond_wait(de265_cond* c,de265_mutex* m) { win32_cond_wait(c,m); }
-void de265_cond_signal(de265_cond* c) { win32_cond_signal(c); }
-#endif // _WIN32
-
-
-
-
 de265_progress_lock::de265_progress_lock()
 {
   mProgress = 0;
-
-  de265_mutex_init(&mutex);
-  de265_cond_init(&cond);
 }
 
 de265_progress_lock::~de265_progress_lock()
 {
-  de265_mutex_destroy(&mutex);
-  de265_cond_destroy(&cond);
 }
 
 void de265_progress_lock::wait_for_progress(int progress)
@@ -105,34 +44,29 @@ void de265_progress_lock::wait_for_progress(int progress)
     return;
   }
 
-  de265_mutex_lock(&mutex);
+  std::unique_lock<std::mutex> lock(mutex);
   while (mProgress < progress) {
-    de265_cond_wait(&cond, &mutex);
+    cond.wait(lock);
   }
-  de265_mutex_unlock(&mutex);
 }
 
 void de265_progress_lock::set_progress(int progress)
 {
-  de265_mutex_lock(&mutex);
+  std::unique_lock<std::mutex> lock(mutex);
 
   if (progress>mProgress) {
     mProgress = progress;
 
-    de265_cond_broadcast(&cond, &mutex);
+    cond.notify_all();
   }
-
-  de265_mutex_unlock(&mutex);
 }
 
 void de265_progress_lock::increase_progress(int progress)
 {
-  de265_mutex_lock(&mutex);
+  std::unique_lock<std::mutex> lock(mutex);
 
   mProgress += progress;
-  de265_cond_broadcast(&cond, &mutex);
-
-  de265_mutex_unlock(&mutex);
+  cond.notify_all();
 }
 
 int  de265_progress_lock::get_progress() const
@@ -155,7 +89,7 @@ void printblks(const thread_pool* pool)
   printf("active threads: %d  queue len: %d\n",pool->num_threads_working,pool->num_tasks);
 
   char *const p = (char *)alloca(w * h * sizeof(char));
-  assert(p != NULL);
+  assert(p != nullptr);
   memset(p,' ',w*h);
 
   for (int i=0;i<pool->num_tasks;i++) {
@@ -186,47 +120,44 @@ void printblks(const thread_pool* pool)
 #endif
 
 
-static THREAD_RESULT_TYPE THREAD_CALLING_CONVENTION worker_thread(THREAD_PARAM_TYPE pool_ptr)
+static void worker_thread(thread_pool* pool)
 {
-  thread_pool* pool = (thread_pool*)pool_ptr;
-
-
-  de265_mutex_lock(&pool->mutex);
-
   while(true) {
 
-    // wait until we can pick a task or until the pool has been stopped
+    thread_task* task = nullptr;
 
-    for (;;) {
-      // end waiting if thread-pool has been stopped or we have a task to execute
+    {
+      std::unique_lock<std::mutex> lock(pool->mutex);
 
-      if (pool->stopped || pool->tasks.size()>0) {
-        break;
+      // wait until we can pick a task or until the pool has been stopped
+
+      for (;;) {
+        // end waiting if thread-pool has been stopped or we have a task to execute
+
+        if (pool->stopped || pool->tasks.size()>0) {
+          break;
+        }
+
+        //printf("going idle\n");
+        pool->cond_var.wait(lock);
       }
 
-      //printf("going idle\n");
-      de265_cond_wait(&pool->cond_var, &pool->mutex);
+      // if the pool was shut down, end the execution
+
+      if (pool->stopped) {
+        return;
+      }
+
+
+      // get a task
+
+      task = pool->tasks.front();
+      pool->tasks.pop_front();
+
+      pool->num_threads_working++;
+
+      //printblks(pool);
     }
-
-    // if the pool was shut down, end the execution
-
-    if (pool->stopped) {
-      de265_mutex_unlock(&pool->mutex);
-      return (THREAD_RESULT_TYPE)0;
-    }
-
-
-    // get a task
-
-    thread_task* task = pool->tasks.front();
-    pool->tasks.pop_front();
-
-    pool->num_threads_working++;
-
-    //printblks(pool);
-
-    de265_mutex_unlock(&pool->mutex);
-
 
     // execute the task
 
@@ -234,81 +165,70 @@ static THREAD_RESULT_TYPE THREAD_CALLING_CONVENTION worker_thread(THREAD_PARAM_T
 
     // end processing and check if this was the last task to be processed
 
-    de265_mutex_lock(&pool->mutex);
+    // TODO: the num_threads_working can probably be an atomic integer
+    std::unique_lock<std::mutex> lock(pool->mutex);
 
     pool->num_threads_working--;
   }
-  de265_mutex_unlock(&pool->mutex);
-
-  return (THREAD_RESULT_TYPE)0;
 }
 
 
-de265_error start_thread_pool(thread_pool* pool, int num_threads)
+de265_error thread_pool::start(int num_threads_to_start)
 {
   de265_error err = DE265_OK;
 
   // limit number of threads to maximum
 
-  if (num_threads > MAX_THREADS) {
-    num_threads = MAX_THREADS;
+  if (num_threads_to_start > MAX_THREADS) {
+    num_threads_to_start = MAX_THREADS;
     err = DE265_WARNING_NUMBER_OF_THREADS_LIMITED_TO_MAXIMUM;
   }
 
-  pool->num_threads = 0; // will be increased below
+  num_threads = 0; // will be increased below
 
-  de265_mutex_init(&pool->mutex);
-  de265_cond_init(&pool->cond_var);
+  {
+    std::unique_lock<std::mutex> lock(mutex);
 
-  de265_mutex_lock(&pool->mutex);
-  pool->num_threads_working = 0;
-  pool->stopped = false;
-  de265_mutex_unlock(&pool->mutex);
+    num_threads_working = 0;
+    stopped = false;
+  }
 
   // start worker threads
 
-  for (int i=0; i<num_threads; i++) {
-    int ret = de265_thread_create(&pool->thread[i], worker_thread, pool);
-    if (ret != 0) {
-      // cerr << "pthread_create() failed: " << ret << endl;
-      return DE265_ERROR_CANNOT_START_THREADPOOL;
-    }
-
-    pool->num_threads++;
+  for (int i=0; i<num_threads_to_start; i++) {
+    thread[i] = std::thread(worker_thread, this);
+    num_threads++;
   }
 
   return err;
 }
 
 
-void stop_thread_pool(thread_pool* pool)
+void thread_pool::stop()
 {
-  de265_mutex_lock(&pool->mutex);
-  pool->stopped = true;
-  de265_mutex_unlock(&pool->mutex);
-
-  de265_cond_broadcast(&pool->cond_var, &pool->mutex);
-
-  for (int i=0;i<pool->num_threads;i++) {
-    de265_thread_join(pool->thread[i]);
-    de265_thread_destroy(&pool->thread[i]);
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    stopped = true;
   }
 
-  de265_mutex_destroy(&pool->mutex);
-  de265_cond_destroy(&pool->cond_var);
+  cond_var.notify_all();
+
+  for (int i=0;i<num_threads;i++) {
+    thread[i].join();
+  }
 }
 
 
-void   add_task(thread_pool* pool, thread_task* task)
+void thread_pool::add_task(thread_task* task)
 {
-  de265_mutex_lock(&pool->mutex);
-  if (!pool->stopped) {
+  std::unique_lock<std::mutex> lock(mutex);
 
-    pool->tasks.push_back(task);
+  if (!stopped) {
+
+    tasks.push_back(task);
 
     // wake up one thread
 
-    de265_cond_signal(&pool->cond_var);
+    cond_var.notify_one();
   }
-  de265_mutex_unlock(&pool->mutex);
 }

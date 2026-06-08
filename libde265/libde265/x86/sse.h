@@ -25,4 +25,13 @@
 
 void init_acceleration_functions_sse(struct acceleration_functions* accel);
 
+// Overrides selected transform kernels with AVX2 versions, but only if the
+// running CPU actually supports AVX2 (checked at runtime). Safe to call on any
+// CPU; a no-op when AVX2 is unavailable.
+void init_acceleration_functions_avx2(struct acceleration_functions* accel);
+
+// Overrides selected transform kernels with AVX-512 versions, runtime-checked.
+// Safe to call on any CPU; a no-op when AVX-512 is unavailable.
+void init_acceleration_functions_avx512(struct acceleration_functions* accel);
+
 #endif

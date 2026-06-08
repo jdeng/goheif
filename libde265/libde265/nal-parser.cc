@@ -24,6 +24,8 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <limits.h>
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -33,12 +35,6 @@
 NAL_unit::NAL_unit()
   : skipped_bytes(DE265_SKIPPED_BYTES_INITIAL_SIZE)
 {
-  pts=0;
-  user_data = NULL;
-
-  nal_data = NULL;
-  data_size = 0;
-  capacity = 0;
 }
 
 NAL_unit::~NAL_unit()
@@ -50,7 +46,7 @@ void NAL_unit::clear()
 {
   header = nal_header();
   pts = 0;
-  user_data = NULL;
+  user_data = nullptr;
 
   // set size to zero but keep memory
   data_size = 0;
@@ -61,18 +57,32 @@ void NAL_unit::clear()
 LIBDE265_CHECK_RESULT bool NAL_unit::resize(int new_size)
 {
   if (capacity < new_size) {
-    unsigned char* newbuffer = (unsigned char*)malloc(new_size);
-    if (newbuffer == NULL) {
+    // Grow the buffer geometrically (1.5x) rather than to the exact requested
+    // size. NAL_Parser::push_data() appends to the pending NAL one input chunk
+    // at a time, increasing the request by a roughly constant amount each call.
+    // With exact-size allocation every chunk would reallocate and copy the
+    // whole accumulated buffer (O(n^2) for a single oversized NAL); spare
+    // capacity amortizes the total copying to O(n). Here new_size > capacity >= 0,
+    // so the 1.5x term is computed in 64 bits and only used when it both exceeds
+    // the request and still fits in 'int'.
+    int alloc_size = new_size;
+    int64_t grow = static_cast<int64_t>(capacity) + capacity / 2;
+    if (grow > new_size && grow <= INT_MAX) {
+      alloc_size = static_cast<int>(grow);
+    }
+
+    unsigned char* newbuffer = static_cast<unsigned char*>(malloc(alloc_size));
+    if (newbuffer == nullptr) {
       return false;
     }
 
-    if (nal_data != NULL) {
+    if (nal_data != nullptr) {
       memcpy(newbuffer, nal_data, data_size);
       free(nal_data);
     }
 
     nal_data = newbuffer;
-    capacity = new_size;
+    capacity = alloc_size;
   }
   return true;
 }
@@ -97,15 +107,20 @@ bool LIBDE265_CHECK_RESULT NAL_unit::set_data(const unsigned char* in_data, int 
   return true;
 }
 
-void NAL_unit::insert_skipped_byte(int pos)
+void NAL_unit::insert_skipped_byte(uint32_t pos)
 {
   skipped_bytes.push_back(pos);
 }
 
-int NAL_unit::num_skipped_bytes_before(int byte_position, int headerLength) const
+uint32_t NAL_unit::num_skipped_bytes_before(uint32_t byte_position, uint32_t headerLength) const
 {
+  if (skipped_bytes.empty()) {
+    return 0;
+  }
+
   for (int k=skipped_bytes.size()-1;k>=0;k--)
-    if (skipped_bytes[k]-headerLength <= byte_position) {
+    if (skipped_bytes[k] >= headerLength &&
+        skipped_bytes[k]-headerLength <= byte_position) {
       return k+1;
     }
 
@@ -114,52 +129,43 @@ int NAL_unit::num_skipped_bytes_before(int byte_position, int headerLength) cons
 
 void NAL_unit::remove_stuffing_bytes()
 {
-  uint8_t* p = data();
+  // Remove emulation-prevention bytes: every 0x03 that immediately follows two
+  // 0x00 bytes is dropped (and the zero-run reset, so 00 00 03 03 keeps the
+  // trailing 03). This is done in a single in-place forward-compaction pass in
+  // O(n) time. A previous implementation called memmove() on the remaining tail
+  // for each removed byte, which is O(n^2) and can be abused by a payload that
+  // is densely packed with 00 00 03 triplets.
 
-  for (int i=0;i<size()-2;i++)
-    {
-#if 0
-        for (int k=i;k<i+64;k++) 
-          if (i*0+k<size()) {
-            printf("%c%02x", (k==i) ? '[':' ', data()[k]);
-          }
-        printf("\n");
-#endif
+  uint8_t* d = data();
+  const int n = size();
 
-      if (p[2]!=3 && p[2]!=0) {
-        // fast forward 3 bytes (2+1)
-        p+=2;
-        i+=2;
-      }
-      else {
-        if (p[0]==0 && p[1]==0 && p[2]==3) {
-          //printf("SKIP NAL @ %d\n",i+2+num_skipped_bytes);
-          insert_skipped_byte(i+2 + num_skipped_bytes());
+  int w = 0;       // write position == length of the compacted output so far
+  int zeros = 0;   // number of consecutive 0x00 bytes already written to output
 
-          memmove(p+2, p+3, size()-i-3);
-          set_size(size()-1);
+  for (int r=0; r<n; r++) {
+    uint8_t b = d[r];
 
-          p++;
-          i++;
-        }
-      }
-
-      p++;
+    if (zeros >= 2 && b == 3) {
+      // 'r' is the position of this byte in the original (uncompacted) NAL,
+      // which equals (compacted position) + num_skipped_bytes() — the value the
+      // previous memmove-based code recorded here.
+      insert_skipped_byte(r);
+      zeros = 0;
+      continue;
     }
+
+    d[w++] = b;
+    zeros = (b == 0) ? zeros + 1 : 0;
+  }
+
+  set_size(w);
 }
 
 
 
 
 
-NAL_Parser::NAL_Parser()
-{
-  end_of_stream = false;
-  end_of_frame = false;
-  input_push_state = 0;
-  pending_input_NAL = NULL;
-  nBytes_in_NAL_queue = 0;
-}
+NAL_Parser::NAL_Parser() = default;
 
 
 NAL_Parser::~NAL_Parser()
@@ -175,7 +181,7 @@ NAL_Parser::~NAL_Parser()
 
   // free the pending input NAL
 
-  if (pending_input_NAL != NULL) {
+  if (pending_input_NAL != nullptr) {
     free_NAL_unit(pending_input_NAL);
   }
 
@@ -204,7 +210,7 @@ LIBDE265_CHECK_RESULT NAL_unit* NAL_Parser::alloc_NAL_unit(int size)
   nal->clear();
   if (!nal->resize(size)) {
     free_NAL_unit(nal);
-    return NULL;
+    return nullptr;
   }
 
   return nal;
@@ -212,8 +218,8 @@ LIBDE265_CHECK_RESULT NAL_unit* NAL_Parser::alloc_NAL_unit(int size)
 
 void NAL_Parser::free_NAL_unit(NAL_unit* nal)
 {
-  if (nal == NULL) {
-    // Allow calling with NULL just like regular "free()"
+  if (nal == nullptr) {
+    // Allow calling with nullptr just like regular "free()"
     return;
   }
   if (NAL_free_list.size() < DE265_NAL_FREE_LIST_SIZE) {
@@ -227,7 +233,7 @@ void NAL_Parser::free_NAL_unit(NAL_unit* nal)
 NAL_unit* NAL_Parser::pop_from_NAL_queue()
 {
   if (NAL_queue.empty()) {
-    return NULL;
+    return nullptr;
   }
   else {
     NAL_unit* nal = NAL_queue.front();
@@ -250,9 +256,9 @@ de265_error NAL_Parser::push_data(const unsigned char* data, int len,
 {
   end_of_frame = false;
 
-  if (pending_input_NAL == NULL) {
+  if (pending_input_NAL == nullptr) {
     pending_input_NAL = alloc_NAL_unit(len+3);
-    if (pending_input_NAL == NULL) {
+    if (pending_input_NAL == nullptr) {
       return DE265_ERROR_OUT_OF_MEMORY;
     }
     pending_input_NAL->pts = pts;
@@ -329,6 +335,14 @@ de265_error NAL_Parser::push_data(const unsigned char* data, int len,
         }
 #endif
 
+        // enforce the maximum NAL size: drop an oversized NAL and resync
+        if (!nal_size_within_limit(out - nal->data())) {
+          free_NAL_unit(pending_input_NAL);
+          pending_input_NAL = nullptr;
+          input_push_state = 0;
+          return DE265_ERROR_NAL_SIZE_EXCEEDS_SECURITY_LIMIT;
+        }
+
         nal->set_size(out - nal->data());;
 
         // push this NAL decoder queue
@@ -338,7 +352,7 @@ de265_error NAL_Parser::push_data(const unsigned char* data, int len,
         // initialize new, empty NAL unit
 
         pending_input_NAL = alloc_NAL_unit(len+3);
-        if (pending_input_NAL == NULL) {
+        if (pending_input_NAL == nullptr) {
           return DE265_ERROR_OUT_OF_MEMORY;
         }
         pending_input_NAL->pts = pts;
@@ -363,6 +377,18 @@ de265_error NAL_Parser::push_data(const unsigned char* data, int len,
   }
 
   nal->set_size(out - nal->data());
+
+  // Enforce the maximum NAL size on the still-incomplete pending NAL. This bounds
+  // memory when a single NAL grows across many push_data() calls without ever
+  // reaching a start code. The oversized pending NAL is dropped and the parser
+  // resyncs at the next start code.
+  if (!nal_size_within_limit(nal->size())) {
+    free_NAL_unit(pending_input_NAL);
+    pending_input_NAL = nullptr;
+    input_push_state = 0;
+    return DE265_ERROR_NAL_SIZE_EXCEEDS_SECURITY_LIMIT;
+  }
+
   return DE265_OK;
 }
 
@@ -372,12 +398,17 @@ de265_error NAL_Parser::push_NAL(const unsigned char* data, int len,
 {
 
   // Cannot use byte-stream input and NAL input at the same time.
-  assert(pending_input_NAL == NULL);
+  assert(pending_input_NAL == nullptr);
 
   end_of_frame = false;
 
+  // enforce the maximum NAL size to bound memory usage
+  if (!nal_size_within_limit(len)) {
+    return DE265_ERROR_NAL_SIZE_EXCEEDS_SECURITY_LIMIT;
+  }
+
   NAL_unit* nal = alloc_NAL_unit(len);
-  if (nal == NULL || !nal->set_data(data, len)) {
+  if (nal == nullptr || !nal->set_data(data, len)) {
     free_NAL_unit(nal);
     return DE265_ERROR_OUT_OF_MEMORY;
   }
@@ -416,7 +447,7 @@ de265_error NAL_Parser::flush_data()
 
     if (input_push_state>=5) {
       push_to_NAL_queue(nal);
-      pending_input_NAL = NULL;
+      pending_input_NAL = nullptr;
     }
 
     input_push_state = 0;
@@ -432,7 +463,7 @@ void NAL_Parser::remove_pending_input_data()
 
   if (pending_input_NAL) {
     free_NAL_unit(pending_input_NAL);
-    pending_input_NAL = NULL;
+    pending_input_NAL = nullptr;
   }
 
   for (;;) {

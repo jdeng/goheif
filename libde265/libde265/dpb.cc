@@ -24,16 +24,6 @@
 #include <assert.h>
 
 
-#define DPB_DEFAULT_MAX_IMAGES  30
-
-
-decoded_picture_buffer::decoded_picture_buffer()
-{
-  max_images_in_DPB  = DPB_DEFAULT_MAX_IMAGES;
-  norm_images_in_DPB = DPB_DEFAULT_MAX_IMAGES;
-}
-
-
 decoded_picture_buffer::~decoded_picture_buffer()
 {
   for (size_t i=0;i<dpb.size();i++)
@@ -73,7 +63,7 @@ bool decoded_picture_buffer::has_free_dpb_picture(bool high_priority) const
 }
 
 
-int decoded_picture_buffer::DPB_index_of_picture_with_POC(int poc, int currentID, bool preferLongTerm) const
+int decoded_picture_buffer::DPB_index_of_picture_with_POC(int poc, uint32_t currentID, bool preferLongTerm) const
 {
   logdebug(LogHeaders,"DPB_index_of_picture_with_POC POC=%d\n",poc);
 
@@ -102,7 +92,7 @@ int decoded_picture_buffer::DPB_index_of_picture_with_POC(int poc, int currentID
 }
 
 
-int decoded_picture_buffer::DPB_index_of_picture_with_LSB(int lsb, int currentID, bool preferLongTerm) const
+int decoded_picture_buffer::DPB_index_of_picture_with_LSB(int lsb, uint32_t currentID, bool preferLongTerm) const
 {
   logdebug(LogHeaders,"get access to picture with LSB %d from DPB\n",lsb);
 
@@ -128,7 +118,7 @@ int decoded_picture_buffer::DPB_index_of_picture_with_LSB(int lsb, int currentID
 }
 
 
-int decoded_picture_buffer::DPB_index_of_picture_with_ID(int id) const
+int decoded_picture_buffer::DPB_index_of_picture_with_ID(uint32_t id) const
 {
   logdebug(LogHeaders,"get access to picture with ID %d from DPB\n",id);
 
@@ -210,7 +200,9 @@ int decoded_picture_buffer::new_image(std::shared_ptr<const seq_parameter_set> s
 
   // --- search for a free slot in the DPB ---
 
-  int free_image_buffer_idx = -DE265_ERROR_IMAGE_BUFFER_FULL;
+  uint8_t free_image_buffer_idx = 0;
+  uint8_t err = DE265_ERROR_IMAGE_BUFFER_FULL;
+
   for (size_t i=0;i<dpb.size();i++) {
     if (dpb[i]->can_be_released()) {
       dpb[i]->release(); /* TODO: this is surely not the best place to free the image, but
@@ -218,6 +210,7 @@ int decoded_picture_buffer::new_image(std::shared_ptr<const seq_parameter_set> s
                             would break the API compatibility. */
 
       free_image_buffer_idx = i;
+      err = DE265_OK;
       break;
     }
   }
@@ -237,22 +230,34 @@ int decoded_picture_buffer::new_image(std::shared_ptr<const seq_parameter_set> s
 
   // create a new image slot if no empty slot remaining
 
-  if (free_image_buffer_idx == -DE265_ERROR_IMAGE_BUFFER_FULL) {
-    free_image_buffer_idx = dpb.size();
+  if (err == DE265_ERROR_IMAGE_BUFFER_FULL) {
+    size_t dpb_size = dpb.size();
+    assert(dpb_size < 255);
+
+    free_image_buffer_idx = static_cast<uint8_t>(dpb_size);
     dpb.push_back(new de265_image);
+    err = DE265_OK;
   }
 
 
   // --- allocate new image ---
 
-  if (free_image_buffer_idx<0) {
-    return free_image_buffer_idx;
+  if (err) {
+    return -err;
   }
 
   de265_image* img = dpb[free_image_buffer_idx];
 
   int w = sps->pic_width_in_luma_samples;
   int h = sps->pic_height_in_luma_samples;
+
+  // --- enforce maximum image size before allocating the image buffer ---
+
+  uint32_t max_image_size_pixels = decctx->param_security_limits.max_image_size_pixels;
+  if (max_image_size_pixels != 0 &&
+      (uint64_t)w * h > max_image_size_pixels) {
+    return -DE265_ERROR_IMAGE_SIZE_EXCEEDS_SECURITY_LIMIT;
+  }
 
   enum de265_chroma chroma;
   switch (sps->chroma_format_idc) {
@@ -263,7 +268,7 @@ int decoded_picture_buffer::new_image(std::shared_ptr<const seq_parameter_set> s
   default: chroma = de265_chroma_420; assert(0); break; // should never happen
   }
 
-  de265_error error = img->alloc_image(w,h, chroma, sps, true, decctx, /*NULL,*/ pts, user_data, isOutputImage);
+  de265_error error = img->alloc_image(w,h, chroma, sps, true, decctx, /*nullptr,*/ pts, user_data, isOutputImage);
   if (error) {
     return -error;
   }
@@ -280,7 +285,7 @@ void decoded_picture_buffer::pop_next_picture_in_output_queue()
 
 
   loginfo(LogDPB, "DPB output queue: ");
-  for (int i=0;i<image_output_queue.size();i++) {
+  for (size_t i=0;i<image_output_queue.size();i++) {
     loginfo(LogDPB, "*%d ", image_output_queue[i]->PicOrderCntVal);
   }
   loginfo(LogDPB,"*\n");

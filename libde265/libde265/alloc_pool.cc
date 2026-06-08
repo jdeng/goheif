@@ -53,7 +53,7 @@ void alloc_pool::add_memory_block()
 
 alloc_pool::~alloc_pool()
 {
-  FOR_LOOP(uint8_t*, p, m_memBlocks) {
+  for (uint8_t* p : m_memBlocks) {
     delete[] p;
   }
 }
@@ -71,7 +71,7 @@ void* alloc_pool::new_obj(const size_t size)
       if (DEBUG_MEMORY) { fprintf(stderr,"additional block allocated in memory pool\n"); }
     }
     else {
-      return NULL;
+      return nullptr;
     }
   }
 
@@ -88,7 +88,7 @@ void  alloc_pool::delete_obj(void* obj)
 {
   int memBlockSize = mObjSize * mPoolSize;
 
-  FOR_LOOP(uint8_t*, memBlk, m_memBlocks) {
+  for (uint8_t* memBlk : m_memBlocks) {
     if (memBlk <= obj && obj < memBlk + memBlockSize) {
       m_freeList.push_back(obj);
       return;
