@@ -453,8 +453,13 @@ de265_error de265_image::alloc_image(int w,int h, enum de265_chroma c,
 
     // CTB info
 
+    // Also reallocate when the CTB size changes even if the unit dimensions stay
+    // constant: a stale ctb_info.log2unitSize otherwise makes set_SliceHeaderIndex
+    // index past the metadata array (heap OOB write).  Backport of upstream
+    // libde265 c7891e41 (1.0.17).
     if (ctb_info.width_in_units != sps->PicWidthInCtbsY ||
-        ctb_info.height_in_units != sps->PicHeightInCtbsY)
+        ctb_info.height_in_units != sps->PicHeightInCtbsY ||
+        ctb_info.log2unitSize    != sps->Log2CtbSizeY)
       {
         delete[] ctb_progress;
 
