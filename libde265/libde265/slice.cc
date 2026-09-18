@@ -3266,11 +3266,22 @@ int residual_coding(thread_context* tctx,
       c1 = 1;
 
 
+      /* Whether this sub-block codes any escape data, i.e. any coeff_abs_level_remaining.
+         Only used for cabac_bypass_alignment_enabled_flag (see below). */
+
+      bool escapeDataPresent = false;
+
+
       // --- decode greater-1 flags ---
 
       int newLastGreater1ScanPos = -1;
 
       int lastGreater1Coefficient = std::min(8, nCoefficients);
+
+      // significant coefficients past the first eight carry no greater-1 flag and are escape coded
+      if (nCoefficients > 8) {
+        escapeDataPresent = true;
+      }
       for (int c = 0; c < lastGreater1Coefficient; c++) {
         int greater1_flag =
             decode_coeff_abs_level_greater1(tctx, cIdx, i,
@@ -3288,6 +3299,9 @@ int residual_coding(thread_context* tctx,
 
           if (newLastGreater1ScanPos == -1) {
             newLastGreater1ScanPos = c;
+          }
+          else {
+            escapeDataPresent = true;
           }
         }
         else {
@@ -3309,6 +3323,10 @@ int residual_coding(thread_context* tctx,
         int flag = decode_coeff_abs_level_greater2(tctx, cIdx, lastInvocation_ctxSet);
         coeff_value[newLastGreater1ScanPos] += flag;
         coeff_has_max_base_level[newLastGreater1ScanPos] = flag;
+
+        if (flag) {
+          escapeDataPresent = true;
+        }
       }
 
 
@@ -3334,6 +3352,14 @@ int residual_coding(thread_context* tctx,
         signHidden = (coeff_scan_pos[0] - coeff_scan_pos[nCoefficients - 1] > 3);
       }
 
+
+      /* (9.3.4.3.6) Align the CABAC engine before the bypass-coded sign flags and
+         remaining levels of a sub-block that carries escape data. No context-coded bin
+         follows until the end of the sub-block, so aligning once here covers both. */
+
+      if (sps.range_extension.cabac_bypass_alignment_enabled_flag && escapeDataPresent) {
+        tctx->cabac_decoder.align_bypass();
+      }
 
       for (int n = 0; n < nCoefficients - 1; n++) {
         coeff_sign[n] = tctx->cabac_decoder.decode_bypass();
@@ -3632,8 +3658,9 @@ int read_transform_unit(thread_context* tctx,
         cu_qp_delta_sign = tctx->cabac_decoder.decode_bypass();
       }
 
-      // CuQpDeltaVal shall be in [-(26 + QpBdOffsetY/2), 25 + QpBdOffsetY/2] (Sec. 7.4.9.10)
-      int maxCuQpDeltaAbs = 25 + tctx->img->get_sps().QpBdOffset_Y / 2;
+      // CuQpDeltaVal shall be in [-(26 + QpBdOffsetY/2), +(25 + QpBdOffsetY/2)] (Sec. 7.4.9.14).
+      // Note that the range is asymmetric.
+      int maxCuQpDeltaAbs = (cu_qp_delta_sign ? 26 : 25) + tctx->img->get_sps().QpBdOffset_Y / 2;
       if (cu_qp_delta_abs > maxCuQpDeltaAbs) {
         tctx->decctx->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
         return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
@@ -4757,7 +4784,13 @@ enum DecodeResult decode_substream(thread_context* tctx,
       // we have to wait until the context model data is there
       tctx->img->wait_for_progress(tctx->task, 1, tctx->CtbY - 1,CTB_PROGRESS_PREFILTER);
 
-      // copy CABAC model from previous CTB row
+      // Copy the CABAC model (and StatCoeff state) saved by the row above.
+      // No lock is needed: the producer stores into ctx_models[CtbY-1] before
+      // it signals the progress of CTB (1, CtbY-1), and the acquire load in
+      // wait_for_progress() above pairs with that release store. The slot has
+      // exactly one producer and one consumer, and after the copy/release
+      // below nobody touches it again. See image_unit::ctx_models for why a
+      // consumer can never skip this wait.
       tctx->ctx_model = tctx->imgunit->ctx_models[(tctx->CtbY - 1)];
       tctx->imgunit->ctx_models[(tctx->CtbY - 1)].release(); // not used anymore
 
@@ -4816,6 +4849,12 @@ enum DecodeResult decode_substream(thread_context* tctx,
         return Decode_Error;
       }
 
+      // Store an independent copy of the CABAC model (and StatCoeff state) for
+      // the row below to pick up. This store must stay ahead of the
+      // set_progress(CTB_PROGRESS_PREFILTER) for this CTB further down: that
+      // release store publishes the slot to the consumer row task, which waits
+      // for CTB (1, ctby) with an acquire load before reading it. No lock is
+      // needed, see image_unit::ctx_models.
       tctx->imgunit->ctx_models[ctby] = tctx->ctx_model;
       tctx->imgunit->ctx_models[ctby].decouple(); // store an independent copy
 

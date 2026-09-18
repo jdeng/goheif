@@ -37,6 +37,7 @@
 
 #include <array>
 #include <memory>
+#include <mutex>
 
 constexpr int DE265_MAX_VPS_SETS = 16;   // this is the maximum as defined in the standard
 constexpr int DE265_MAX_SPS_SETS = 16;   // this is the maximum as defined in the standard
@@ -144,7 +145,7 @@ public:
   slice_unit(decoder_context* decctx);
   ~slice_unit();
 
-  NAL_unit* nal;   // we are the owner
+  std::unique_ptr<NAL_unit> nal;   // we are the owner
   slice_segment_header* shdr;  // not the owner (de265_image is owner)
   bitreader reader;
 
@@ -261,7 +262,20 @@ public:
 
   /* Saved context models for WPP.
      There is one saved model for the initialization of each CTB row.
-     The array is unused for non-WPP streams. */
+     The array is unused for non-WPP streams.
+
+     Threading: context_model_table is a reference-counted handle (model
+     pointer plus refcount pointer) that is not thread-safe, so each slot is
+     touched by exactly one producer and one consumer and never concurrently.
+     The row task of row N stores into ctx_models[N] after decoding CTB x=1
+     and only then signals CTB_PROGRESS_PREFILTER for that CTB; the row task
+     of row N+1 waits for that progress before it copies and releases the
+     slot. The acquire/release ordering of de265_progress_lock makes the
+     store visible to the consumer, so no lock is needed. This relies on the
+     wait never being skipped because of stale progress: slice segments must
+     arrive in increasing address order (slice_segment_order_is_valid()) and
+     decode_slice_unit_WPP() resets the progress of the rows it schedules
+     (GHSA-xp3h-6f5r-8cxp). */
   std::vector<context_model_table> ctx_models;  // TODO: move this into image ?
 
   /* Saved StatCoeff[] (persistent_rice_adaptation state) parallel to ctx_models.
@@ -319,7 +333,7 @@ class decoder_context : public base_context {
   uint8_t get_nal_unit_type() const { return nal_unit_type; }
   bool    get_RapPicFlag() const { return RapPicFlag; }
 
-  de265_error decode_NAL(NAL_unit* nal);
+  de265_error decode_NAL(std::unique_ptr<NAL_unit> nal);
 
   de265_error decode(int* more);
   de265_error decode_some(bool* did_work);
@@ -391,7 +405,7 @@ class decoder_context : public base_context {
   de265_error read_pps_NAL(bitreader&);
   de265_error read_sei_NAL(bitreader& reader, bool suffix);
   de265_error read_eos_NAL(bitreader& reader);
-  de265_error read_slice_NAL(bitreader&, NAL_unit* nal, nal_header& nal_hdr);
+  de265_error read_slice_NAL(bitreader&, std::unique_ptr<NAL_unit> nal, nal_header& nal_hdr);
 
  private:
   // --- internal data ---
@@ -515,6 +529,12 @@ class decoder_context : public base_context {
   void add_task_decode_CTB_row(thread_context* tctx, bool firstSliceSubstream, uint16_t ctbRow);
   void add_task_decode_slice_segment(thread_context* tctx, bool firstSliceSubstream,
                                      uint16_t ctbX, uint16_t ctbY);
+
+  /* Check that the slice segment 'shdr' may be appended to 'imgunit', i.e. that
+     its first CTB follows the previous slice segment of the picture in tile-scan
+     order (H.265 7.4.2.4.5). Adds a warning and marks the image as faulty when
+     the slice segment has to be dropped. */
+  bool slice_segment_order_is_valid(image_unit* imgunit, const slice_segment_header* shdr);
 
   void mark_whole_slice_as_processed(image_unit* imgunit,
                                      slice_unit* sliceunit,

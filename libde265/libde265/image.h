@@ -32,6 +32,7 @@
 #include <string.h>
 #include <limits>
 #include <memory>
+#include <atomic>
 
 #include "libde265/de265.h"
 #include "libde265/sps.h"
@@ -87,7 +88,7 @@ template <class DataUnit> class MetaDataArray
   MetaDataArray() = default;
   ~MetaDataArray() { free(data); }
 
-  LIBDE265_CHECK_RESULT bool alloc(int w,int h, uint8_t _log2unitSize) {
+  [[nodiscard]] bool alloc(int w,int h, uint8_t _log2unitSize) {
     int size = w*h;
 
     if (size != data_size) {
@@ -427,7 +428,8 @@ public:
                                      void* userdata);
   */
 
-  uint8_t integrity = INTEGRITY_NOT_DECODED; /* Whether an error occurred while the image was decoded.
+  // Written from several worker threads on error paths, hence atomic.
+  std::atomic<uint8_t> integrity{INTEGRITY_NOT_DECODED}; /* Whether an error occurred while the image was decoded.
                                                 When generated, this is initialized to INTEGRITY_CORRECT,
                                                 and changed on decoding errors.
                                               */
