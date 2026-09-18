@@ -40,7 +40,8 @@ extern "C" {
   #else
   #define LIBDE265_API __declspec(dllimport)
   #endif
-#elif HAVE_VISIBILITY
+#elif (defined(__GNUC__) || defined(__clang__)) && HAVE_VISIBILITY
+  // GCC-style visibility attributes
   #ifdef LIBDE265_EXPORTS
   #define LIBDE265_API __attribute__((__visibility__("default")))
   #else
@@ -97,6 +98,7 @@ typedef enum {
   DE265_ERROR_UNSPECIFIED_DECODING_ERROR=18,
   DE265_ERROR_IMAGE_SIZE_EXCEEDS_SECURITY_LIMIT=19,
   DE265_ERROR_NAL_SIZE_EXCEEDS_SECURITY_LIMIT=20,
+  DE265_ERROR_INVALID_ARGUMENT=21,
 
   // --- errors that should become obsolete in later libde265 versions ---
 
@@ -143,7 +145,8 @@ typedef enum {
   DE265_WARNING_INVALID_SLICE_HEADER_INDEX_ACCESS=1033,
   DE265_WARNING_INVALID_TU_BLOCK_SPLIT=1034,
   DE265_WARNING_RICE_PARAMETER_OUT_OF_RANGE=1035,
-  DE265_WARNING_MAX_NUMBER_OF_SEI_MESSAGES_EXCEEDED=1036
+  DE265_WARNING_MAX_NUMBER_OF_SEI_MESSAGES_EXCEEDED=1036,
+  DE265_WARNING_SLICE_SEGMENT_ADDRESS_NOT_INCREASING=1037
 } de265_error;
 
 LIBDE265_API const char* de265_get_error_text(de265_error err);
@@ -265,6 +268,9 @@ LIBDE265_API void        de265_push_end_of_frame(de265_decoder_context*);
 /* Push a complete NAL unit without startcode into the decoder. The data must still
    contain all stuffing-bytes.
    This function only pushes data into the decoder, nothing will be decoded.
+   The NAL unit must at least contain the two-byte NAL unit header. A shorter
+   (or negative) length is rejected with DE265_ERROR_INVALID_ARGUMENT and nothing
+   is pushed.
 */
 LIBDE265_API de265_error de265_push_NAL(de265_decoder_context*, const void* data, int length,
                                         de265_PTS pts, void* user_data);
@@ -346,6 +352,25 @@ typedef struct de265_image_spec
   int visible_height; // convenience, height - crop_top - crop_bottom
 } de265_image_spec;
 
+/* Custom image buffer allocation.
+
+   get_buffer() has to provide the image planes by calling de265_set_image_plane()
+   for each of them. The buffers have to be large enough for the image described by
+   'spec', taking spec->alignment into account when computing the stride, plus at
+   least 16 trailing bytes beyond the last row. The SIMD code processes whole vectors
+   and may read up to a vector past the pixels it actually uses, so a plane allocated
+   with no slack is read out of bounds. Allocate the trailing bytes unconditionally;
+   whether they are touched depends on which SIMD paths libde265 was built with and
+   on the CPU it runs on.
+
+   The memory handed back has to be zero-initialized (or otherwise fully initialized).
+   libde265 does not clear buffers obtained from get_buffer(); only the built-in
+   allocator returned by de265_get_default_image_allocation_functions() clears them
+   itself. If an allocator returns uninitialized memory, any part of an image that the
+   decoder does not write -- for example a picture that a corrupted stream covers only
+   partially with slices -- shows up in the decoded output, exposing whatever the
+   application previously kept in that memory.
+*/
 typedef struct de265_image_allocation
 {
   int  (*get_buffer)(de265_decoder_context* ctx, // first parameter deprecated

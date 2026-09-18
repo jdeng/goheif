@@ -84,6 +84,7 @@ LIBDE265_API const char* de265_get_error_text(de265_error err)
   case DE265_ERROR_IMAGE_BUFFER_FULL: return "DPB/output queue full";
   case DE265_ERROR_IMAGE_SIZE_EXCEEDS_SECURITY_LIMIT: return "image size exceeds security limit";
   case DE265_ERROR_NAL_SIZE_EXCEEDS_SECURITY_LIMIT: return "NAL unit size exceeds security limit";
+  case DE265_ERROR_INVALID_ARGUMENT: return "invalid argument";
   case DE265_ERROR_CANNOT_START_THREADPOOL: return "cannot start decoding threads";
   case DE265_ERROR_LIBRARY_INITIALIZATION_FAILED: return "global library initialization failed";
   case DE265_ERROR_LIBRARY_NOT_INITIALIZED: return "cannot free library data (not initialized";
@@ -184,6 +185,8 @@ LIBDE265_API const char* de265_get_error_text(de265_error err)
     return "Rice parameter or StatCoeff out of range, clamped";
   case DE265_WARNING_MAX_NUMBER_OF_SEI_MESSAGES_EXCEEDED:
     return "number of SEI messages exceeds security limit, dropped";
+  case DE265_WARNING_SLICE_SEGMENT_ADDRESS_NOT_INCREASING:
+    return "slice segment address not increasing within picture, slice segment dropped";
 
   default: return "unknown error";
   }
