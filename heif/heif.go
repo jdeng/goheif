@@ -22,6 +22,7 @@ limitations under the License.
 package heif
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -174,7 +175,23 @@ func (f *File) EXIF() ([]byte, error) {
 		return nil, err
 	}
 
-	return data[4:], nil // TODO: why 4? did I miss something?
+	// Per ISO/IEC 23008-12 Annex A, the Exif item begins with a 4-byte
+	// big-endian exif_tiff_header_offset field giving the offset, from the
+	// byte following this field, to the start of the actual TIFF header.
+	// Most encoders set it to 0, but some (observed in the wild) embed an
+	// additional marker -- e.g. a JPEG-APP1-style "Exif\x00\x00" -- before
+	// the TIFF header and set a non-zero offset accordingly. Previously this
+	// unconditionally skipped 4 bytes, which only happens to work when the
+	// offset is 0.
+	if len(data) < 4 {
+		return nil, fmt.Errorf("heif: exif item too short: %d bytes", len(data))
+	}
+	offset := binary.BigEndian.Uint32(data[:4])
+	start := uint64(4) + uint64(offset)
+	if start > uint64(len(data)) {
+		return nil, fmt.Errorf("heif: exif_tiff_header_offset %d exceeds item length %d", offset, len(data))
+	}
+	return data[start:], nil
 }
 
 // GetItemData returns data specified by item's location

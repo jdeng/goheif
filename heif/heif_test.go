@@ -54,9 +54,12 @@ func TestAll(t *testing.T) {
 	if err != nil {
 		t.Errorf("EXIF: %v", err)
 	} else {
-		const magic = "Exif\x00\x00"
-		if !bytes.HasPrefix(exbuf, []byte(magic)) {
-			t.Errorf("Exif buffer doesn't start with %q: got %q", magic, exbuf)
+		// EXIF() now correctly honors exif_tiff_header_offset, so the
+		// returned buffer starts directly with the TIFF header rather than
+		// a redundant "Exif\x00\x00" marker (this file's offset is 6, past
+		// that marker). goexif's Decode doesn't need the marker either way.
+		if !bytes.HasPrefix(exbuf, []byte("II*\x00")) && !bytes.HasPrefix(exbuf, []byte("MM\x00*")) {
+			t.Errorf("Exif buffer doesn't start with a TIFF header: got %q", exbuf)
 		}
 		x, err := exif.Decode(bytes.NewReader(exbuf))
 		if err != nil {
